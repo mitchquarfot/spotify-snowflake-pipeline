@@ -1,0 +1,11 @@
+spotipy==2.22.1
+boto3==1.34.34
+python-dotenv==1.0.0
+schedule==1.2.0
+requests==2.31.0
+pandas==2.1.4
+pyarrow==14.0.2
+jsonlines==4.0.0
+pydantic==2.5.3
+structlog==23.2.0
+tenacity==8.2.3 
