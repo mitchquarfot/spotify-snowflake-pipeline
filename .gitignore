@@ -1,3 +1,5 @@
 .env
 .env_template.txt
 .spotify_cache
+.DS_Store
+__pycache__/
