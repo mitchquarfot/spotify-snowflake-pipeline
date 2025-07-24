@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     spotify_client_id: str = Field(..., env="SPOTIFY_CLIENT_ID")
     spotify_client_secret: str = Field(..., env="SPOTIFY_CLIENT_SECRET") 
     spotify_redirect_uri: str = Field("http://localhost:8080/callback", env="SPOTIFY_REDIRECT_URI")
+    spotify_refresh_token: Optional[str] = Field(None, env="SPOTIFY_REFRESH_TOKEN")
     
     # AWS configuration
     aws_access_key_id: str = Field(..., env="AWS_ACCESS_KEY_ID")
@@ -40,6 +41,7 @@ class Settings(BaseSettings):
                 self.client_id = settings.spotify_client_id
                 self.client_secret = settings.spotify_client_secret
                 self.redirect_uri = settings.spotify_redirect_uri
+                self.refresh_token = settings.spotify_refresh_token
         return SpotifyConfig(self)
     
     @property 

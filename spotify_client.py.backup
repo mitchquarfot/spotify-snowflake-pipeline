@@ -2,7 +2,6 @@
 
 import json
 import time
-import os
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Generator
 import spotipy
@@ -27,37 +26,13 @@ class SpotifyClient:
             scope="user-read-recently-played user-read-playback-state",
             cache_path=".spotify_cache"
         )
-        
-        # If we have a refresh token, use it
-        if settings.spotify.refresh_token:
-            self._setup_with_refresh_token()
-        
         self.sp = spotipy.Spotify(auth_manager=self.auth_manager)
         logger.info("Spotify client initialized")
-    
-    def _setup_with_refresh_token(self):
-        """Set up auth manager with stored refresh token."""
-        try:
-            # Create token info dict with refresh token
-            token_info = {
-                'refresh_token': settings.spotify.refresh_token,
-                'access_token': None,
-                'expires_at': 0,  # Force refresh
-                'scope': 'user-read-recently-played user-read-playback-state',
-                'token_type': 'Bearer'
-            }
-            
-            # Save token info to cache
-            self.auth_manager.cache_handler.save_token_to_cache(token_info)
-            logger.info("Loaded refresh token from settings")
-            
-        except Exception as e:
-            logger.warning("Failed to set up refresh token", error=str(e))
     
     def authenticate(self) -> bool:
         """Ensure user is authenticated."""
         try:
-            # This will use cached token or refresh if needed
+            # This will trigger OAuth flow if needed
             self.sp.current_user()
             logger.info("Successfully authenticated with Spotify")
             return True
@@ -218,4 +193,4 @@ class SpotifyClient:
             # Pipeline metadata
             "ingested_at": datetime.now(timezone.utc).isoformat(),
             "data_source": "spotify_recently_played_api"
-        }
+        } 
