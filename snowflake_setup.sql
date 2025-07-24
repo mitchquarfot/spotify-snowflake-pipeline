@@ -49,7 +49,34 @@ CREATE OR REPLACE TABLE spotify_listening_history (
 )
 CLUSTER BY (played_at_date, primary_artist_name);
 
--- 3. Create S3 Stage
+-- 3. Create the artist-genre table
+CREATE OR REPLACE TABLE spotify_artist_genres (
+    -- Artist identification
+    artist_id STRING(22) PRIMARY KEY,
+    artist_name STRING(500),
+    artist_uri STRING(50),
+    
+    -- Genre information
+    genres VARIANT, -- Full genres array as JSON
+    genres_list ARRAY, -- Genres as native array for easier querying
+    primary_genre STRING(100), -- Most relevant/first genre
+    genre_count NUMBER(3,0), -- Number of genres for this artist
+    
+    -- Artist metrics
+    popularity NUMBER(3,0), -- Artist popularity score (0-100)
+    followers_total NUMBER(38,0), -- Total follower count
+    
+    -- Additional metadata
+    external_urls VARIANT, -- External URLs (Spotify, etc.)
+    images VARIANT, -- Artist image URLs and metadata
+    
+    -- Pipeline metadata
+    ingested_at TIMESTAMP_NTZ,
+    data_source STRING(50) DEFAULT 'spotify_artist_api'
+)
+CLUSTER BY (primary_genre, popularity DESC);
+
+-- 4. Create S3 Stage for listening history
 -- Replace YOUR_BUCKET_NAME, YOUR_ACCESS_KEY, YOUR_SECRET_KEY with actual values
 CREATE OR REPLACE STAGE spotify_s3_stage
 URL = 's3://YOUR_BUCKET_NAME/spotify_listening_history/'
@@ -64,10 +91,25 @@ FILE_FORMAT = (
     IGNORE_UTF8_ERRORS = TRUE
 );
 
--- 4. Test the stage (optional)
--- LIST @spotify_s3_stage;
+-- 5. Create S3 Stage for artist-genre data
+CREATE OR REPLACE STAGE spotify_artist_s3_stage
+URL = 's3://YOUR_BUCKET_NAME/spotify_artist_genres/'
+CREDENTIALS = (
+    AWS_KEY_ID = 'YOUR_ACCESS_KEY'
+    AWS_SECRET_KEY = 'YOUR_SECRET_KEY'
+)
+FILE_FORMAT = (
+    TYPE = JSON
+    COMPRESSION = GZIP
+    STRIP_OUTER_ARRAY = FALSE
+    IGNORE_UTF8_ERRORS = TRUE
+);
 
--- 5. Create Snowpipe for automatic ingestion
+-- 6. Test the stages (optional)
+-- LIST @spotify_s3_stage;
+-- LIST @spotify_artist_s3_stage;
+
+-- 7. Create Snowpipe for automatic listening history ingestion
 CREATE OR REPLACE PIPE spotify_ingestion_pipe
 AUTO_INGEST = TRUE
 AS
@@ -82,10 +124,25 @@ FILE_FORMAT = (
 MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE
 ON_ERROR = 'SKIP_FILE';
 
--- 6. Show pipe details (copy the SQS queue URL for S3 notification setup)
-SHOW PIPES LIKE 'spotify_ingestion_pipe';
+-- 8. Create Snowpipe for automatic artist-genre ingestion
+CREATE OR REPLACE PIPE spotify_artist_ingestion_pipe
+AUTO_INGEST = TRUE
+AS
+COPY INTO spotify_artist_genres
+FROM @spotify_artist_s3_stage
+FILE_FORMAT = (
+    TYPE = JSON 
+    COMPRESSION = GZIP
+    STRIP_OUTER_ARRAY = FALSE
+    IGNORE_UTF8_ERRORS = TRUE
+)
+MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE
+ON_ERROR = 'SKIP_FILE';
 
--- 7. Create useful views for analytics
+-- 9. Show pipe details (copy the SQS queue URLs for S3 notification setup)
+SHOW PIPES LIKE 'spotify_%_pipe';
+
+-- 10. Create useful views for analytics
 
 -- Daily listening summary view
 CREATE OR REPLACE VIEW daily_listening_summary AS
@@ -102,21 +159,59 @@ FROM spotify_listening_history
 GROUP BY played_at_date
 ORDER BY played_at_date DESC;
 
--- Artist statistics view
-CREATE OR REPLACE VIEW artist_stats AS
+-- Artist statistics view with genre information
+CREATE OR REPLACE VIEW artist_stats_with_genres AS
 SELECT 
-    primary_artist_name,
+    h.primary_artist_name,
+    h.primary_artist_id,
+    ag.primary_genre,
+    ag.genres_list,
+    ag.genre_count,
+    ag.popularity AS artist_popularity,
+    ag.followers_total,
     COUNT(*) AS total_plays,
-    COUNT(DISTINCT track_id) AS unique_tracks,
-    COUNT(DISTINCT album_id) AS unique_albums,
-    SUM(track_duration_ms) / 1000 / 60 AS total_minutes,
-    AVG(track_popularity) AS avg_track_popularity,
-    MIN(played_at) AS first_played,
-    MAX(played_at) AS last_played
-FROM spotify_listening_history
-WHERE primary_artist_name IS NOT NULL
-GROUP BY primary_artist_name
+    COUNT(DISTINCT h.track_id) AS unique_tracks,
+    COUNT(DISTINCT h.album_id) AS unique_albums,
+    SUM(h.track_duration_ms) / 1000 / 60 AS total_minutes,
+    AVG(h.track_popularity) AS avg_track_popularity,
+    MIN(h.played_at) AS first_played,
+    MAX(h.played_at) AS last_played
+FROM spotify_listening_history h
+LEFT JOIN spotify_artist_genres ag ON h.primary_artist_id = ag.artist_id
+WHERE h.primary_artist_name IS NOT NULL
+GROUP BY h.primary_artist_name, h.primary_artist_id, ag.primary_genre, 
+         ag.genres_list, ag.genre_count, ag.popularity, ag.followers_total
 ORDER BY total_plays DESC;
+
+-- Genre analysis view
+CREATE OR REPLACE VIEW genre_listening_analysis AS
+SELECT 
+    ag.primary_genre,
+    COUNT(DISTINCT h.primary_artist_id) AS unique_artists,
+    COUNT(*) AS total_plays,
+    COUNT(DISTINCT h.track_id) AS unique_tracks,
+    SUM(h.track_duration_ms) / 1000 / 60 AS total_minutes,
+    AVG(h.track_popularity) AS avg_track_popularity,
+    AVG(ag.popularity) AS avg_artist_popularity,
+    AVG(ag.followers_total) AS avg_artist_followers
+FROM spotify_listening_history h
+JOIN spotify_artist_genres ag ON h.primary_artist_id = ag.artist_id
+WHERE ag.primary_genre IS NOT NULL
+GROUP BY ag.primary_genre
+ORDER BY total_plays DESC;
+
+-- Multi-genre artist analysis (artists with multiple genres)
+CREATE OR REPLACE VIEW multi_genre_artists AS
+SELECT 
+    artist_id,
+    artist_name,
+    genres_list,
+    genre_count,
+    popularity,
+    followers_total
+FROM spotify_artist_genres
+WHERE genre_count > 1
+ORDER BY genre_count DESC, popularity DESC;
 
 -- Hourly listening patterns view
 CREATE OR REPLACE VIEW hourly_patterns AS
@@ -143,7 +238,7 @@ WHERE context_type IS NOT NULL
 GROUP BY context_type
 ORDER BY total_plays DESC;
 
--- 8. Create monitoring table for pipeline health
+-- 11. Create monitoring table for pipeline health
 CREATE OR REPLACE TABLE pipeline_monitoring (
     check_timestamp TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
     metric_name STRING(100),
@@ -151,7 +246,7 @@ CREATE OR REPLACE TABLE pipeline_monitoring (
     metric_description STRING(500)
 );
 
--- 9. Create a procedure to update monitoring metrics
+-- 12. Create a procedure to update monitoring metrics
 CREATE OR REPLACE PROCEDURE update_pipeline_metrics()
 RETURNS STRING
 LANGUAGE SQL
@@ -161,7 +256,7 @@ BEGIN
     -- Clear old metrics
     DELETE FROM pipeline_monitoring WHERE check_timestamp < DATEADD(day, -7, CURRENT_TIMESTAMP());
     
-    -- Insert current metrics
+    -- Insert current metrics for listening history
     INSERT INTO pipeline_monitoring (metric_name, metric_value, metric_description)
     SELECT 
         'total_tracks_ingested',
@@ -184,47 +279,48 @@ BEGIN
     FROM spotify_listening_history 
     WHERE ingested_at >= DATEADD('hour', -24, CURRENT_TIMESTAMP());
     
+    -- Insert current metrics for artist-genre data
+    INSERT INTO pipeline_monitoring (metric_name, metric_value, metric_description)
+    SELECT 
+        'total_artists_processed',
+        COUNT(*),
+        'Total number of unique artists with genre data'
+    FROM spotify_artist_genres;
+    
+    INSERT INTO pipeline_monitoring (metric_name, metric_value, metric_description)
+    SELECT 
+        'artists_with_genres',
+        COUNT(*),
+        'Number of artists that have at least one genre'
+    FROM spotify_artist_genres
+    WHERE genre_count > 0;
+    
+    INSERT INTO pipeline_monitoring (metric_name, metric_value, metric_description)
+    SELECT 
+        'avg_genres_per_artist',
+        AVG(genre_count),
+        'Average number of genres per artist'
+    FROM spotify_artist_genres
+    WHERE genre_count > 0;
+    
     RETURN 'Metrics updated successfully';
 END;
 $$;
 
--- 10. Sample queries to verify everything works
+-- 13. Sample queries to verify everything works
 
--- Test query: Recent listening activity
-SELECT 
-    played_at,
-    track_name,
-    primary_artist_name,
-    album_name,
-    context_type
-FROM spotify_listening_history 
-ORDER BY played_at DESC 
-LIMIT 10;
+-- Test listening history data
+-- SELECT * FROM spotify_listening_history LIMIT 10;
 
--- Test query: Daily summary for last week
-SELECT * FROM daily_listening_summary 
-WHERE played_at_date >= DATEADD('day', -7, CURRENT_DATE())
-ORDER BY played_at_date DESC;
+-- Test artist-genre data
+-- SELECT * FROM spotify_artist_genres LIMIT 10;
 
--- 11. Set up task to run monitoring procedure daily
-CREATE OR REPLACE TASK update_metrics_task
-WAREHOUSE = 'COMPUTE_WH'  -- Replace with your warehouse name
-SCHEDULE = 'USING CRON 0 6 * * * UTC'  -- Daily at 6 AM UTC
-AS
-CALL update_pipeline_metrics();
+-- Test artist stats with genres
+-- SELECT * FROM artist_stats_with_genres LIMIT 10;
 
--- Start the task (uncomment when ready)
--- ALTER TASK update_metrics_task RESUME;
+-- Test genre analysis
+-- SELECT * FROM genre_listening_analysis LIMIT 10;
 
--- 12. Grant permissions (adjust as needed for your security model)
--- GRANT USAGE ON DATABASE spotify_analytics TO ROLE analyst_role;
--- GRANT USAGE ON SCHEMA spotify_analytics.raw_data TO ROLE analyst_role;
--- GRANT SELECT ON ALL TABLES IN SCHEMA spotify_analytics.raw_data TO ROLE analyst_role;
--- GRANT SELECT ON ALL VIEWS IN SCHEMA spotify_analytics.raw_data TO ROLE analyst_role;
-
--- Setup complete!
--- Next steps:
--- 1. Update the stage credentials with your actual AWS details
--- 2. Copy the Snowpipe SQS queue URL from SHOW PIPES output
--- 3. Configure S3 bucket notifications to send to that SQS queue
--- 4. Run your Python pipeline to start ingesting data 
+-- Update and check monitoring metrics
+-- CALL update_pipeline_metrics();
+-- SELECT * FROM pipeline_monitoring ORDER BY check_timestamp DESC; 

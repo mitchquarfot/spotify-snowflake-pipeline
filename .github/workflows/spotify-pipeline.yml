@@ -43,8 +43,8 @@ jobs:
         
     - name: Run Spotify data collection
       run: |
-        python main.py run-once
+        python main.py --enable-artist-genre-processing run-once
         
     - name: Show pipeline stats
       run: |
-        python main.py stats
+        python main.py --enable-artist-genre-processing stats

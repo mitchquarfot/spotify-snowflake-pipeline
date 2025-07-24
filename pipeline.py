@@ -10,6 +10,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from spotify_client import SpotifyClient
 from s3_client import S3Client
+from artist_genre_processor import ArtistGenreProcessor
 from config import settings
 
 logger = structlog.get_logger(__name__)
@@ -18,14 +19,24 @@ logger = structlog.get_logger(__name__)
 class SpotifyDataPipeline:
     """Main pipeline for streaming Spotify data to S3."""
     
-    def __init__(self):
+    def __init__(self, enable_artist_genre_processing: bool = False):
         """Initialize pipeline with clients."""
         self.spotify_client = SpotifyClient()
         self.s3_client = S3Client()
         self.state_file = "pipeline_state.json"
         self.last_processed_timestamp = None
         
-        logger.info("Pipeline initialized")
+        # Optional artist-genre processing
+        self.enable_artist_genre_processing = enable_artist_genre_processing
+        if self.enable_artist_genre_processing:
+            self.artist_genre_processor = ArtistGenreProcessor(
+                spotify_client=self.spotify_client,
+                s3_client=self.s3_client
+            )
+            logger.info("Pipeline initialized with artist-genre processing enabled")
+        else:
+            self.artist_genre_processor = None
+            logger.info("Pipeline initialized")
     
     def load_state(self) -> Dict:
         """Load pipeline state from file."""
@@ -90,8 +101,18 @@ class SpotifyDataPipeline:
                 transformed = self.spotify_client.transform_track_data(track_item)
                 transformed_tracks.append(transformed)
             
-            # Upload to S3
+            # Upload tracks to S3
             s3_key = self.s3_client.upload_tracks_batch(transformed_tracks)
+            
+            # Process artist-genre data if enabled
+            artist_processed_count = 0
+            if self.enable_artist_genre_processing and self.artist_genre_processor:
+                try:
+                    artist_processed_count = self.artist_genre_processor.process_new_artists_from_tracks(tracks)
+                    logger.info("Processed artist-genre data", new_artists=artist_processed_count)
+                except Exception as e:
+                    logger.error("Failed to process artist-genre data", error=str(e))
+                    # Don't fail the entire batch if artist processing fails
             
             if s3_key:
                 # Update last processed timestamp
@@ -107,7 +128,8 @@ class SpotifyDataPipeline:
                     "Successfully processed batch",
                     track_count=len(tracks),
                     s3_key=s3_key,
-                    last_timestamp=last_timestamp
+                    last_timestamp=last_timestamp,
+                    new_artists_processed=artist_processed_count
                 )
                 return True
             else:
@@ -269,6 +291,71 @@ class SpotifyDataPipeline:
         if original_timestamp and original_timestamp > self.last_processed_timestamp:
             self.update_last_processed_timestamp(original_timestamp)
     
+    def backfill_artist_genre_data(self, days: int = 30):
+        """
+        Backfill artist-genre data by processing artists from historical listening data.
+        
+        Args:
+            days: Number of days of listening history to extract artists from
+        """
+        if not self.enable_artist_genre_processing or not self.artist_genre_processor:
+            # Temporarily enable artist processing for this operation
+            self.artist_genre_processor = ArtistGenreProcessor(
+                spotify_client=self.spotify_client,
+                s3_client=self.s3_client
+            )
+            temp_enabled = True
+            logger.info("Temporarily enabled artist-genre processing for backfill")
+        else:
+            temp_enabled = False
+        
+        logger.info("Starting artist-genre data backfill", days=days)
+        
+        if days > 50:
+            logger.warning("Spotify API only provides ~50 days of history, limiting to 50 days")
+            days = 50
+        
+        # Calculate start timestamp
+        start_time = datetime.now(timezone.utc) - timedelta(days=days)
+        start_timestamp = int(start_time.timestamp() * 1000)
+        
+        try:
+            # Collect all tracks from the specified period
+            all_tracks = []
+            batch_count = 0
+            
+            logger.info("Collecting tracks from listening history for artist extraction")
+            for track in self.spotify_client.get_all_recent_tracks_since(start_timestamp):
+                all_tracks.append(track)
+                
+                # Process in smaller batches to avoid memory issues
+                if len(all_tracks) >= settings.pipeline.batch_size * 5:  # 5x normal batch size
+                    artist_count = self.artist_genre_processor.process_new_artists_from_tracks(all_tracks)
+                    logger.info(f"Processed batch {batch_count + 1}, new artists: {artist_count}")
+                    all_tracks = []  # Reset for next batch
+                    batch_count += 1
+                    
+                    # Rate limiting for large backfills
+                    time.sleep(2.0)
+            
+            # Process remaining tracks
+            if all_tracks:
+                artist_count = self.artist_genre_processor.process_new_artists_from_tracks(all_tracks)
+                logger.info(f"Processed final batch, new artists: {artist_count}")
+            
+            # Get final stats
+            final_stats = self.artist_genre_processor.get_stats()
+            logger.info("Artist-genre backfill completed", 
+                       total_processed_artists=final_stats["total_processed_artists"])
+            
+        except Exception as e:
+            logger.error("Artist-genre backfill failed", error=str(e))
+        
+        # Clean up temporary processor if needed
+        if temp_enabled:
+            self.artist_genre_processor = None
+            logger.info("Disabled temporary artist-genre processing")
+    
     def get_pipeline_stats(self) -> Dict:
         """Get pipeline statistics and status."""
         try:
@@ -287,6 +374,18 @@ class SpotifyDataPipeline:
                     "s3_prefix": settings.pipeline.snowflake_stage_prefix
                 }
             }
+            
+            # Add artist-genre processing stats if enabled
+            if self.enable_artist_genre_processing and self.artist_genre_processor:
+                artist_stats = self.artist_genre_processor.get_stats()
+                stats["artist_genre_processing"] = {
+                    "enabled": True,
+                    "total_processed_artists": artist_stats["total_processed_artists"],
+                    "artist_s3_prefix": artist_stats["artist_s3_prefix"],
+                    "state_file": artist_stats["state_file"]
+                }
+            else:
+                stats["artist_genre_processing"] = {"enabled": False}
             
             logger.info("Generated pipeline stats", stats=stats)
             return stats

@@ -39,6 +39,13 @@ def main():
         description="Spotify to S3 Data Pipeline for Snowflake ingestion"
     )
     
+    # Global options
+    parser.add_argument(
+        "--enable-artist-genre-processing",
+        action="store_true",
+        help="Enable artist genre processing alongside track processing"
+    )
+    
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     
     # Run once command
@@ -65,6 +72,18 @@ def main():
         help="Number of days to backfill (default: 7, max: 50)"
     )
     
+    # Artist genre specific commands
+    artist_backfill_parser = subparsers.add_parser(
+        "backfill-artists",
+        help="Process artist-genre data for all unique artists from recent listening history"
+    )
+    artist_backfill_parser.add_argument(
+        "--days",
+        type=int,
+        default=30,
+        help="Number of days of listening history to extract artists from (default: 30)"
+    )
+    
     # Stats command
     stats_parser = subparsers.add_parser(
         "stats",
@@ -84,7 +103,7 @@ def main():
         sys.exit(1)
     
     try:
-        pipeline = SpotifyDataPipeline()
+        pipeline = SpotifyDataPipeline(enable_artist_genre_processing=args.enable_artist_genre_processing)
         
         if args.command == "run-once":
             logger.info("Running pipeline once")
@@ -107,6 +126,12 @@ def main():
             pipeline.backfill_historical_data(args.days)
             print("✅ Backfill completed")
         
+        elif args.command == "backfill-artists":
+            logger.info("Starting artist backfill", days=args.days)
+            print(f"📥 Starting artist backfill for {args.days} days")
+            pipeline.backfill_artist_genre_data(args.days)
+            print("✅ Artist backfill completed")
+        
         elif args.command == "stats":
             logger.info("Getting pipeline stats")
             stats = pipeline.get_pipeline_stats()
@@ -117,6 +142,16 @@ def main():
             print(f"   S3 bucket: {stats.get('bucket_name', 'N/A')}")
             print(f"   Batch size: {stats.get('config', {}).get('batch_size', 'N/A')}")
             print(f"   Fetch interval: {stats.get('config', {}).get('fetch_interval_minutes', 'N/A')} min")
+            
+            # Display artist-genre processing stats
+            artist_stats = stats.get('artist_genre_processing', {})
+            if artist_stats.get('enabled'):
+                print(f"\n🎭 Artist Genre Processing:")
+                print(f"   Status: Enabled ✅")
+                print(f"   Processed artists: {artist_stats.get('total_processed_artists', 0):,}")
+                print(f"   S3 prefix: {artist_stats.get('artist_s3_prefix', 'N/A')}")
+            else:
+                print(f"\n🎭 Artist Genre Processing: Disabled")
         
         elif args.command == "test":
             logger.info("Testing connections")

@@ -219,3 +219,134 @@ class SpotifyClient:
             "ingested_at": datetime.now(timezone.utc).isoformat(),
             "data_source": "spotify_recently_played_api"
         }
+    
+    def extract_artists_from_tracks(self, track_items: List[Dict]) -> List[Dict]:
+        """
+        Extract unique artists from a list of track items.
+        
+        Args:
+            track_items: List of raw track items from Spotify API
+            
+        Returns:
+            List of unique artist dictionaries with id, name, and uri
+        """
+        unique_artists = {}
+        
+        for track_item in track_items:
+            track = track_item.get("track", {})
+            artists = track.get("artists", [])
+            
+            for artist in artists:
+                artist_id = artist.get("id")
+                if artist_id and artist_id not in unique_artists:
+                    unique_artists[artist_id] = {
+                        "id": artist_id,
+                        "name": artist.get("name"),
+                        "uri": artist.get("uri"),
+                        "external_urls": artist.get("external_urls", {})
+                    }
+        
+        return list(unique_artists.values())
+    
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10)
+    )
+    def get_artist_details(self, artist_id: str) -> Optional[Dict]:
+        """
+        Get detailed information about an artist including genres.
+        
+        Args:
+            artist_id: Spotify artist ID
+            
+        Returns:
+            Artist details including genres, or None if not found
+        """
+        try:
+            artist = self.sp.artist(artist_id)
+            logger.debug("Fetched artist details", artist_id=artist_id, name=artist.get("name"))
+            return artist
+        except Exception as e:
+            logger.warning("Failed to fetch artist details", artist_id=artist_id, error=str(e))
+            return None
+    
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10)
+    )
+    def get_multiple_artists(self, artist_ids: List[str], batch_size: int = 50) -> List[Dict]:
+        """
+        Get details for multiple artists in batches.
+        
+        Args:
+            artist_ids: List of Spotify artist IDs
+            batch_size: Number of artists to fetch per batch (max 50)
+            
+        Returns:
+            List of artist detail dictionaries
+        """
+        all_artists = []
+        
+        # Process in batches due to API limitations
+        for i in range(0, len(artist_ids), batch_size):
+            batch_ids = artist_ids[i:i + batch_size]
+            
+            try:
+                # Remove any None values
+                batch_ids = [aid for aid in batch_ids if aid]
+                if not batch_ids:
+                    continue
+                
+                artists = self.sp.artists(batch_ids)
+                batch_artists = artists.get("artists", [])
+                all_artists.extend([artist for artist in batch_artists if artist])
+                
+                logger.info(
+                    "Fetched artist batch",
+                    batch_number=i // batch_size + 1,
+                    batch_size=len(batch_ids),
+                    fetched_count=len(batch_artists)
+                )
+                
+                # Rate limiting - be conservative with batch requests
+                time.sleep(1.0)
+                
+            except Exception as e:
+                logger.error(
+                    "Failed to fetch artist batch",
+                    batch_ids=batch_ids,
+                    error=str(e)
+                )
+                continue
+        
+        logger.info("Completed artist batch fetching", total_fetched=len(all_artists))
+        return all_artists
+    
+    def transform_artist_data(self, artist: Dict) -> Dict:
+        """
+        Transform artist data into Snowflake-friendly format.
+        
+        Args:
+            artist: Raw artist data from Spotify API
+            
+        Returns:
+            Transformed artist data with genres
+        """
+        genres = artist.get("genres", [])
+        followers = artist.get("followers", {})
+        
+        return {
+            "artist_id": artist.get("id"),
+            "artist_name": artist.get("name"),
+            "artist_uri": artist.get("uri"),
+            "genres": json.dumps(genres),
+            "genres_list": genres,  # For easier querying
+            "primary_genre": genres[0] if genres else None,  # Most relevant genre (safe access)
+            "genre_count": len(genres),
+            "popularity": artist.get("popularity"),
+            "followers_total": followers.get("total") if followers else None,
+            "external_urls": json.dumps(artist.get("external_urls", {})),
+            "images": json.dumps(artist.get("images", [])),
+            "ingested_at": datetime.now(timezone.utc).isoformat(),
+            "data_source": "spotify_artist_api"
+        }
