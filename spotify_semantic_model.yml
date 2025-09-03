@@ -1,0 +1,522 @@
+name: spotify_analytics
+description: Comprehensive personal Spotify listening analytics with genre enrichment and temporal analysis in Mountain Time (Denver, CO)
+
+tables:
+  # =============================================================================
+  # SILVER LAYER - Core Business Data
+  # =============================================================================
+  
+  - name: silver_listening_enriched
+    description: Enhanced listening history with genre data, temporal analysis, and Mountain Time conversion
+    base_table:
+      database: spotify_analytics
+      schema: medallion_arch
+      table: silver_listening_enriched
+    primary_key:
+      columns:
+        - unique_play
+    dimensions:
+      # Identifiers
+      - name: unique_play
+        expr: unique_play
+        data_type: string
+        description: Unique listening event identifier
+      
+      # Temporal dimensions
+      - name: denver_date
+        expr: denver_date
+        data_type: date
+        description: Listening date in Mountain Time
+      - name: denver_hour
+        expr: denver_hour
+        data_type: number
+        description: Hour of day (0-23) in Mountain Time
+      - name: denver_year
+        expr: denver_year
+        data_type: number
+        description: Year in Mountain Time
+      - name: denver_month
+        expr: denver_month
+        data_type: number
+        description: Month number (1-12) in Mountain Time
+      - name: denver_quarter
+        expr: denver_quarter
+        data_type: number
+        description: Quarter (1-4) in Mountain Time
+      - name: day_of_week
+        expr: DAYNAME(denver_timestamp)
+        data_type: string
+        description: Day of the week name
+      - name: is_weekend
+        expr: is_weekend
+        data_type: boolean
+        description: Whether listening occurred on weekend
+      - name: time_of_day_category
+        expr: time_of_day_category
+        data_type: string
+        description: Time period (morning, afternoon, evening, night)
+      
+      # Track dimensions
+      - name: track_name
+        expr: track_name
+        data_type: string
+        description: Song title
+      - name: track_explicit
+        expr: track_explicit
+        data_type: boolean
+        description: Whether track contains explicit content
+      - name: track_id
+        expr: track_id
+        data_type: string
+        description: Spotify track unique identifier
+      
+      # Artist dimensions
+      - name: primary_artist_name
+        expr: primary_artist_name
+        data_type: string
+        description: Primary artist name
+      - name: primary_artist_id
+        expr: primary_artist_id
+        data_type: string
+        description: Primary artist Spotify identifier
+      - name: primary_genre
+        expr: primary_genre
+        data_type: string
+        description: Artist's primary/most relevant genre
+      - name: is_multi_genre_artist
+        expr: is_multi_genre_artist
+        data_type: boolean
+        description: Whether artist has multiple genres
+      
+      # Album dimensions
+      - name: album_name
+        expr: album_name
+        data_type: string
+        description: Album title
+      - name: album_type
+        expr: album_type
+        data_type: string
+        description: Type of release (album, single, compilation)
+      - name: album_release_year
+        expr: album_release_year
+        data_type: number
+        description: Year album was released
+      - name: is_single
+        expr: is_single
+        data_type: boolean
+        description: Whether release is a single
+      
+      # Context dimensions
+      - name: listening_source
+        expr: listening_source
+        data_type: string
+        description: How track was accessed (playlist, artist, album, search)
+    
+    facts:
+      # Volume measures
+      - name: total_plays
+        expr: unique_play
+        default_aggregation: count
+        data_type: number
+        description: Total number of listening events
+      - name: total_listening_minutes
+        expr: track_duration_minutes
+        default_aggregation: sum
+        data_type: number
+        description: Total minutes of music consumed
+      - name: average_track_length
+        expr: track_duration_minutes
+        default_aggregation: avg
+        data_type: number
+        description: Average track duration in minutes
+      
+      # Popularity measures
+      - name: average_track_popularity
+        expr: track_popularity
+        default_aggregation: avg
+        data_type: number
+        description: Average popularity of tracks (0-100 scale)
+      - name: average_artist_popularity
+        expr: artist_popularity
+        default_aggregation: avg
+        data_type: number
+        description: Average popularity of artists (0-100 scale)
+      - name: mainstream_score
+        expr: (track_popularity + artist_popularity) / 2
+        default_aggregation: avg
+        data_type: number
+        description: Combined mainstream indicator (0-100, higher = more mainstream)
+      
+      # Discovery measures
+      - name: unique_artists
+        expr: primary_artist_id
+        default_aggregation: count_distinct
+        data_type: number
+        description: Number of different artists
+      - name: unique_tracks
+        expr: track_id
+        default_aggregation: count_distinct
+        data_type: number
+        description: Number of different songs
+      - name: unique_genres
+        expr: primary_genre
+        default_aggregation: count_distinct
+        data_type: number
+        description: Number of different genres
+      - name: unique_albums
+        expr: album_id
+        default_aggregation: count_distinct
+        data_type: number
+        description: Number of different albums
+      
+      # Follower measures
+      - name: average_artist_followers
+        expr: artist_followers
+        default_aggregation: avg
+        data_type: number
+        description: Average follower count of artists
+
+  # =============================================================================
+  # GOLD LAYER - Daily Analytics
+  # =============================================================================
+  
+  - name: gold_daily_listening_summary
+    description: Daily aggregated listening metrics with genre and popularity analysis
+    base_table:
+      database: spotify_analytics
+      schema: medallion_arch
+      table: gold_daily_listening_summary
+    primary_key:
+      columns:
+        - denver_date
+    dimensions:
+      - name: denver_date
+        expr: denver_date
+        data_type: date
+        description: Date in Mountain Time
+      - name: day_of_week
+        expr: day_of_week
+        data_type: string
+        description: Day of the week name
+      - name: is_weekend
+        expr: is_weekend
+        data_type: boolean
+        description: Whether this was a weekend day
+      - name: month_name
+        expr: month_name
+        data_type: string
+        description: Month name (January, February, etc.)
+      - name: quarter
+        expr: quarter
+        data_type: number
+        description: Quarter of the year (1-4)
+      - name: year
+        expr: year
+        data_type: number
+        description: Year
+    facts:
+      - name: daily_total_plays
+        expr: total_plays
+        default_aggregation: sum
+        data_type: number
+        description: Total songs listened to this day
+      - name: daily_unique_tracks
+        expr: unique_tracks
+        default_aggregation: sum
+        data_type: number
+        description: Number of different songs played
+      - name: daily_unique_artists
+        expr: unique_artists
+        default_aggregation: sum
+        data_type: number
+        description: Number of different artists listened to
+      - name: daily_listening_minutes
+        expr: total_listening_minutes
+        default_aggregation: sum
+        data_type: number
+        description: Total minutes of music consumed
+      - name: daily_genre_diversity_score
+        expr: genre_diversity_score
+        default_aggregation: avg
+        data_type: number
+        description: Genre variety percentage (higher = more diverse)
+      - name: daily_mainstream_score
+        expr: mainstream_score
+        default_aggregation: avg
+        data_type: number
+        description: Daily mainstream vs niche taste indicator
+
+  # =============================================================================
+  # GOLD LAYER - Genre Analytics
+  # =============================================================================
+  
+  - name: gold_genre_analysis_complete
+    description: Complete genre analysis with actual top artists (not alphabetical)
+    base_table:
+      database: spotify_analytics
+      schema: medallion_arch
+      table: gold_genre_analysis_complete
+    primary_key:
+      columns:
+        - primary_genre
+    dimensions:
+      - name: primary_genre
+        expr: primary_genre
+        data_type: string
+        description: Music genre
+      - name: top_artist
+        expr: top_artist
+        data_type: string
+        description: Most played artist in this genre (by actual play count)
+    facts:
+      - name: genre_total_plays
+        expr: total_plays
+        default_aggregation: sum
+        data_type: number
+        description: Total songs played in this genre
+      - name: genre_unique_artists
+        expr: unique_artists
+        default_aggregation: sum
+        data_type: number
+        description: Number of different artists in this genre
+      - name: genre_listening_minutes
+        expr: total_listening_minutes
+        default_aggregation: sum
+        data_type: number
+        description: Total time spent listening to this genre
+      - name: genre_percentage_of_listening
+        expr: percentage_of_total_listening
+        default_aggregation: avg
+        data_type: number
+        description: What percentage of total listening this genre represents
+      - name: top_artist_plays
+        expr: top_artist_plays
+        default_aggregation: sum
+        data_type: number
+        description: Play count for the top artist in this genre
+
+  # =============================================================================
+  # GOLD LAYER - Monthly Insights
+  # =============================================================================
+  
+  - name: gold_monthly_insights_complete
+    description: Monthly listening patterns with growth metrics and actual top items
+    base_table:
+      database: spotify_analytics
+      schema: medallion_arch
+      table: gold_monthly_insights_complete
+    primary_key:
+      columns:
+        - year
+        - month
+    dimensions:
+      - name: year
+        expr: year
+        data_type: number
+        description: Year
+      - name: month
+        expr: month
+        data_type: number
+        description: Month number (1-12)
+      - name: month_name
+        expr: month_name
+        data_type: string
+        description: Month name (January, February, etc.)
+      - name: quarter
+        expr: quarter
+        data_type: number
+        description: Quarter of the year (1-4)
+      - name: top_artist
+        expr: top_artist
+        data_type: string
+        description: Most played artist this month (by actual play count)
+      - name: top_genre
+        expr: top_genre
+        data_type: string
+        description: Most played genre this month (by actual play count)
+      - name: top_track
+        expr: top_track
+        data_type: string
+        description: Most played track this month (by actual play count)
+      - name: mainstream_tendency
+        expr: mainstream_tendency
+        data_type: string
+        description: Categorical mainstream classification (High/Moderate/Underground)
+    facts:
+      - name: monthly_total_plays
+        expr: total_plays
+        default_aggregation: sum
+        data_type: number
+        description: Total songs played this month
+      - name: monthly_listening_hours
+        expr: total_listening_hours
+        default_aggregation: sum
+        data_type: number
+        description: Total hours of music consumed
+      - name: monthly_unique_artists
+        expr: unique_artists
+        default_aggregation: sum
+        data_type: number
+        description: Number of different artists discovered/listened to
+      - name: artist_discovery_rate
+        expr: artist_discovery_rate
+        default_aggregation: avg
+        data_type: number
+        description: Rate of new artist discovery (artists per 100 plays)
+      - name: plays_growth_rate
+        expr: plays_growth_rate
+        default_aggregation: avg
+        data_type: number
+        description: Percentage change in total plays vs previous month
+
+  # =============================================================================
+  # SILVER LAYER - Artist Summary
+  # =============================================================================
+  
+  - name: silver_artist_summary
+    description: Artist-level aggregated listening statistics with genre analysis
+    base_table:
+      database: spotify_analytics
+      schema: medallion_arch
+      table: silver_artist_summary
+    primary_key:
+      columns:
+        - artist_id
+    dimensions:
+      - name: artist_id
+        expr: artist_id
+        data_type: string
+        description: Spotify artist unique identifier
+      - name: artist_name
+        expr: artist_name
+        data_type: string
+        description: Artist display name
+      - name: primary_genre
+        expr: primary_genre
+        data_type: string
+        description: Artist's primary genre
+      - name: is_multi_genre_artist
+        expr: is_multi_genre_artist
+        data_type: boolean
+        description: Whether artist has multiple genres
+      - name: first_listened
+        expr: first_listened
+        data_type: timestamp
+        description: When you first discovered this artist
+      - name: last_listened
+        expr: last_listened
+        data_type: timestamp
+        description: Most recent listening session
+    facts:
+      - name: artist_total_plays
+        expr: total_plays
+        default_aggregation: sum
+        data_type: number
+        description: Total times you've listened to this artist
+      - name: artist_listening_minutes
+        expr: total_listening_minutes
+        default_aggregation: sum
+        data_type: number
+        description: Total minutes spent listening to this artist
+      - name: artist_unique_tracks
+        expr: unique_tracks_played
+        default_aggregation: sum
+        data_type: number
+        description: Number of different songs heard from this artist
+      - name: artist_popularity
+        expr: artist_popularity
+        default_aggregation: avg
+        data_type: number
+        description: Spotify popularity score for artist (0-100)
+
+# =============================================================================
+# RELATIONSHIPS
+# =============================================================================
+
+relationships:
+  - name: listening_to_daily_summary
+    leftTable: silver_listening_enriched
+    rightTable: gold_daily_listening_summary
+    relationshipColumns:
+      - leftColumn: denver_date
+        rightColumn: denver_date
+    joinType: left_outer
+    relationshipType: many_to_one
+
+  - name: listening_to_artist_summary
+    leftTable: silver_listening_enriched
+    rightTable: silver_artist_summary
+    relationshipColumns:
+      - leftColumn: primary_artist_id
+        rightColumn: artist_id
+    joinType: left_outer
+    relationshipType: many_to_one
+
+# =============================================================================
+# VERIFIED QUERIES - Example questions with known answers
+# =============================================================================
+
+verifiedQueries:
+  - name: "daily_listening_count"
+    question: "How many songs did I listen to yesterday?"
+    sql: |
+      SELECT daily_total_plays
+      FROM gold_daily_listening_summary
+      WHERE denver_date = CURRENT_DATE() - 1
+    
+  - name: "top_genre_analysis"
+    question: "What's my most played genre?"
+    sql: |
+      SELECT primary_genre, genre_total_plays
+      FROM gold_genre_analysis_complete
+      ORDER BY genre_total_plays DESC
+      LIMIT 1
+    
+  - name: "country_top_artist"
+    question: "Who is my top artist in country music?"
+    sql: |
+      SELECT top_artist, top_artist_plays
+      FROM gold_genre_analysis_complete
+      WHERE primary_genre = 'country'
+    
+  - name: "monthly_listening_trends"
+    question: "How has my listening changed over the past 3 months?"
+    sql: |
+      SELECT month_name, monthly_total_plays, plays_growth_rate
+      FROM gold_monthly_insights_complete
+      WHERE year = YEAR(CURRENT_DATE())
+      ORDER BY year DESC, month DESC
+      LIMIT 3
+
+# =============================================================================
+# CUSTOM INSTRUCTIONS
+# =============================================================================
+
+customInstructions: |
+  When analyzing this Spotify data, keep in mind:
+  - All timestamps are in Mountain Time (Denver, CO timezone)
+  - Mainstream scores range from 0-100 (higher = more mainstream taste)
+  - Genre data includes both Spotify-provided and AI-enhanced classifications
+  - "Top" metrics (top_artist, top_genre, etc.) are based on actual play counts, not alphabetical sorting
+  - Use the *_complete views for analysis that needs actual top items by play count
+  - Weekend is defined as Saturday and Sunday
+  - Time of day categories: morning (6-11), afternoon (12-17), evening (18-21), night (22-5)
+
+# =============================================================================
+# METRICS DEFINITIONS
+# =============================================================================
+
+metrics:
+  - name: listening_volume
+    description: Total amount of music consumption
+    expr: total_plays
+    
+  - name: musical_diversity
+    description: Variety and breadth of musical taste measured by unique artists
+    expr: unique_artists
+    
+  - name: mainstream_indicators
+    description: Alignment with popular music trends
+    expr: mainstream_score
+
+# Tags section removed - optional field that was causing parsing issues
