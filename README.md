@@ -1,333 +1,483 @@
-# Spotify to Snowflake Data Pipeline
+# 🎵 Spotify Analytics Pipeline
 
-A robust, production-ready pipeline that extracts your Spotify listening history via the Web API, stores it in Amazon S3 with Snowflake-compatible partitioning, and enables real-time data ingestion into Snowflake using Snowpipe.
+A comprehensive, production-ready pipeline that transforms your Spotify listening history into rich, queryable analytics with AI-enhanced genre classification, medallion data architecture, and natural language querying capabilities.
 
-## 🎯 Features
+## ✨ Features
 
-- **Spotify Integration**: OAuth-based authentication with retry logic and rate limiting
-- **S3 Storage**: Automatically partitioned, compressed JSONL files optimized for Snowflake
-- **Incremental Processing**: State management to avoid duplicate data processing  
-- **Scheduling**: Configurable intervals for continuous data collection
-- **Error Handling**: Comprehensive retry logic with exponential backoff
-- **Monitoring**: Structured logging and pipeline statistics
-- **Snowflake Ready**: Data format and partitioning designed for Snowpipe ingestion
+### 🎯 Core Pipeline
+- **🔐 Spotify Integration**: OAuth-based authentication with retry logic and rate limiting
+- **☁️ S3 Storage**: Automatically partitioned, compressed JSONL files optimized for Snowflake
+- **🔄 Incremental Processing**: State management to avoid duplicate data processing  
+- **⏰ Scheduling**: Configurable intervals for continuous data collection
+- **🛡️ Error Handling**: Comprehensive retry logic with exponential backoff
+- **📊 Monitoring**: Structured logging and pipeline statistics
 
-## 📊 Data Schema
+### 🎨 Genre Intelligence
+- **🧠 AI-Enhanced Classification**: Automatically fills missing genre data using name patterns and popularity analysis
+- **📈 Complete Coverage**: Ensures every artist has genre classification
+- **🔍 Source Tracking**: Distinguishes between Spotify-provided and AI-inferred genres
+- **🎭 Multi-Genre Support**: Handles artists with multiple genre classifications
 
-The pipeline transforms Spotify's raw API data into a flattened, analytics-friendly schema:
+### 🏔️ Mountain Time Analytics
+- **🌄 Denver Timezone**: All temporal analysis in Mountain Time (Denver, CO)
+- **🕐 Time-of-Day Insights**: Morning, afternoon, evening, and night listening patterns
+- **📅 Weekend Analysis**: Distinguish weekday vs weekend listening behavior
+- **📆 Seasonal Trends**: Monthly and quarterly listening pattern analysis
 
+### 🥇 Medallion Architecture
+- **🥉 Bronze Layer**: Raw data with minimal processing and deduplication
+- **🥈 Silver Layer**: Enriched, business-ready data with genre enhancement
+- **🥇 Gold Layer**: Analytics-ready aggregations for daily, genre, and monthly insights
+- **⚡ Dynamic Tables**: Auto-refreshing materialized views for real-time analytics
+
+### 🤖 Natural Language Querying
+- **🗣️ Conversational Analytics**: Ask questions about your data in plain English
+- **🧠 LLM Integration**: Powered by Snowflake Cortex Analyst
+- **📊 Semantic Model**: Rich metadata for accurate query interpretation
+- **💬 Example Queries**: Pre-verified questions for immediate insights
+
+### 🔄 Automation & CI/CD
+- **🚀 GitHub Actions**: Automated daily data collection
+- **📈 Pipeline Monitoring**: Track collection statistics and data quality
+- **🔧 Health Checks**: Automated testing and validation
+- **📧 Notifications**: Pipeline status and error reporting
+
+## 📊 Data Schema & Analytics
+
+### Raw Data Transformation
 ```json
 {
+  "unique_play": "20240115_143000_4iV5W9uYEdYUVa79Axb7Rh",
   "played_at": "2024-01-15T14:30:00Z",
-  "played_at_timestamp": 1705329000,
-  "played_at_date": "2024-01-15",
-  "played_at_hour": 14,
+  "denver_timestamp": "2024-01-15T07:30:00",
   "track_id": "4iV5W9uYEdYUVa79Axb7Rh",
   "track_name": "Never Gonna Give You Up",
-  "track_duration_ms": 213573,
   "primary_artist_name": "Rick Astley",
-  "album_name": "Whenever You Need Somebody",
-  "context_type": "playlist",
-  "ingested_at": "2024-01-15T14:31:00Z"
+  "primary_genre": "dance pop",
+  "artist_popularity": 73,
+  "mainstream_score": 78.5,
+  "time_of_day_category": "morning",
+  "is_weekend": false
 }
 ```
 
+### Analytics Tables Available
+- **📅 Daily Summaries**: `gold_daily_listening_summary`
+- **🎵 Genre Analysis**: `gold_genre_analysis_complete` 
+- **📈 Monthly Trends**: `gold_monthly_insights_complete`
+- **👨‍🎤 Artist Insights**: `silver_artist_summary`
+- **🎧 Enhanced Listening**: `silver_listening_enriched`
+
 ## 🚀 Quick Start
 
-### 1. Prerequisites
-
-- Python 3.8+
-- Spotify account and Developer App
-- AWS account with S3 access
-- (Optional) Snowflake account for final data warehouse
-
-### 2. Setup
-
+### Option 1: Automated Setup (Recommended)
 ```bash
-# Clone and navigate to the project
-git clone <your-repo>
+# Clone the repository
+git clone https://github.com/your-username/spotify-snowflake-pipeline.git
 cd spotify-snowflake-pipeline
 
-# Install dependencies
+# Run the automated setup script
+chmod +x quick_start.sh
+./quick_start.sh
+
+# The script will:
+# ✅ Check prerequisites
+# ✅ Create virtual environment  
+# ✅ Install dependencies
+# ✅ Configure credentials
+# ✅ Test setup
+# ✅ Run first collection
+```
+
+### Option 2: Manual Setup
+```bash
+# 1. Clone and setup environment
+git clone https://github.com/your-username/spotify-snowflake-pipeline.git
+cd spotify-snowflake-pipeline
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 
-# Run the interactive setup
-python setup.py
+# 2. Configure credentials
+python3 setup.py
+
+# 3. Test and run
+python3 main.py test
+python3 main.py run-once --enable-artist-genre-processing
 ```
 
-The setup script will guide you through:
-- Creating a Spotify Developer App
-- Configuring AWS credentials
-- Setting pipeline parameters
+## 🔧 Configuration
 
-### 3. Test Your Configuration
-
-```bash
-# Test all connections
-python main.py test
-
-# Run the pipeline once
-python main.py run-once
-
-# Check statistics
-python main.py stats
-```
-
-### 4. Start Continuous Collection
-
-```bash
-# Run continuously (Ctrl+C to stop)
-python main.py run-continuous
-
-# Or backfill historical data first
-python main.py backfill --days 30
-```
-
-## 📁 S3 Data Structure
-
-Files are organized for optimal Snowflake ingestion:
-
-```
-s3://your-bucket/spotify_listening_history/
-├── 2024/01/15/spotify_tracks_20240115_143000_batch_50.json.gz
-├── 2024/01/15/spotify_tracks_20240115_150000_batch_42.json.gz
-└── 2024/01/16/spotify_tracks_20240116_090000_batch_35.json.gz
-```
-
-## ⚙️ Configuration
+### Prerequisites
+- **Python 3.8+**
+- **Spotify Developer App**: [Create here](https://developer.spotify.com/dashboard)
+- **AWS Account**: S3 access required
+- **Snowflake Account**: Optional but recommended for full analytics
 
 ### Environment Variables
-
-Create a `.env` file or set these environment variables:
+Create a `.env` file with:
 
 ```bash
-# Spotify API
-SPOTIFY_CLIENT_ID=your_client_id
-SPOTIFY_CLIENT_SECRET=your_client_secret
+# Spotify API Credentials
+SPOTIFY_CLIENT_ID=your_spotify_client_id
+SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
 SPOTIFY_REDIRECT_URI=http://localhost:8080/callback
 
-# AWS
-AWS_ACCESS_KEY_ID=your_access_key
-AWS_SECRET_ACCESS_KEY=your_secret_key
+# AWS Configuration
+AWS_ACCESS_KEY_ID=your_aws_access_key
+AWS_SECRET_ACCESS_KEY=your_aws_secret_key
 AWS_REGION=us-west-2
-S3_BUCKET_NAME=your-spotify-bucket
+S3_BUCKET_NAME=your-spotify-analytics-bucket
 
-# Pipeline
+# Pipeline Configuration
 FETCH_INTERVAL_MINUTES=30
 BATCH_SIZE=50
 SNOWFLAKE_STAGE_PREFIX=spotify_listening_history/
 ```
 
-### Command Line Options
+## 💻 Usage
 
+### Basic Commands
 ```bash
-# Run once and exit
-python main.py run-once
+# One-time collection with genre processing
+python main.py run-once --enable-artist-genre-processing
 
-# Run continuously on schedule  
-python main.py run-continuous
+# Continuous collection (every 30 minutes)
+python main.py run-continuous --enable-artist-genre-processing
 
-# Backfill historical data
-python main.py backfill --days 7
+# Backfill historical data (last 7 days)
+python main.py backfill --days 7 --enable-artist-genre-processing
 
-# Show pipeline statistics
-python main.py stats
+# View pipeline statistics
+python main.py stats --enable-artist-genre-processing
 
-# Test connections
+# Process specific artists for genre enhancement
+python main.py process-artists --artists "4iHNK0tOyZPYnBU7nGAgpQ,1Xyo4u8uXC1ZmMpatF05PJ"
+
+# Test all connections
 python main.py test
 ```
 
-## ❄️ Snowflake Integration
+### Advanced Features
+```bash
+# Backfill artist genre data for existing tracks
+python main.py backfill-artists --days 30
 
-### 1. Create Table
+# Run without genre processing (faster)
+python main.py run-once
 
+# Custom batch sizes for large backlogs
+python main.py backfill --days 30 --batch-size 100
+```
+
+## ❄️ Snowflake Setup
+
+### 1. Database & Schema Setup
 ```sql
-CREATE TABLE spotify_listening_history (
-    played_at TIMESTAMP_NTZ,
-    played_at_timestamp NUMBER,
-    played_at_date DATE,
-    played_at_hour NUMBER,
-    track_id STRING,
-    track_name STRING,
-    track_duration_ms NUMBER,
-    track_popularity NUMBER,
-    track_explicit BOOLEAN,
-    primary_artist_id STRING,
-    primary_artist_name STRING,
-    album_id STRING,
-    album_name STRING,
-    album_type STRING,
-    album_release_date STRING,
-    context_type STRING,
-    ingested_at TIMESTAMP_NTZ,
-    data_source STRING DEFAULT 'spotify_recently_played_api'
+-- Run the complete setup script
+-- File: snowflake_setup.sql
+
+CREATE DATABASE spotify_analytics;
+CREATE ROLE spotify_analyst_role;
+CREATE SCHEMA raw_data;
+CREATE SCHEMA medallion_arch;
+
+-- Tables, Snowpipe, and external stages are configured automatically
+```
+
+### 2. Medallion Architecture Deployment
+```sql
+-- Deploy the Bronze → Silver → Gold transformation layers
+-- File: medallion_architecture_views.sql
+
+-- Bronze: Raw data with deduplication
+-- Silver: Enriched data with genre and temporal analysis  
+-- Gold: Analytics-ready daily, genre, and monthly insights
+```
+
+### 3. Enhanced Analytics
+```sql
+-- Deploy corrected analytics views
+-- File: fix_medallion_simple_approach.sql
+
+-- Fixes "MIN() alphabetical issues" with actual top artists/genres/tracks
+-- Provides gold_*_complete views with accurate rankings
+```
+
+### 4. Natural Language Querying
+```sql
+-- Upload semantic model for LLM integration
+CREATE STAGE semantic_models;
+PUT file://spotify_semantic_model.yml @semantic_models;
+
+-- Ask questions in plain English!
+SELECT SNOWFLAKE.CORTEX.ANALYST(
+    @semantic_models/spotify_semantic_model.yml,
+    'What is my most played genre this month?'
 );
 ```
 
-### 2. Create Stage
+## 📈 Example Analytics Queries
 
+### Daily Insights
 ```sql
-CREATE STAGE spotify_stage
-URL = 's3://your-spotify-bucket/spotify_listening_history/'
-CREDENTIALS = (
-    AWS_KEY_ID = 'your_access_key'
-    AWS_SECRET_KEY = 'your_secret_key'
-)
-FILE_FORMAT = (
-    TYPE = JSON
-    COMPRESSION = GZIP
-    STRIP_OUTER_ARRAY = FALSE
-);
-```
-
-### 3. Create Snowpipe
-
-```sql
-CREATE PIPE spotify_pipe 
-AUTO_INGEST = TRUE
-AS
-COPY INTO spotify_listening_history
-FROM @spotify_stage
-FILE_FORMAT = (TYPE = JSON COMPRESSION = GZIP)
-MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE;
-```
-
-### 4. Configure S3 Event Notifications
-
-Set up S3 bucket notifications to trigger Snowpipe on new file uploads:
-
-1. Go to your S3 bucket → Properties → Event notifications
-2. Create notification for `s3:ObjectCreated:*` events
-3. Set destination to your Snowpipe SQS queue
-4. Filter by prefix: `spotify_listening_history/`
-
-## 🔧 Advanced Configuration
-
-### Custom Data Transformations
-
-Modify `spotify_client.py`'s `transform_track_data()` method to add custom fields:
-
-```python
-def transform_track_data(self, track_item: Dict) -> Dict:
-    # ... existing transformation ...
-    
-    # Add custom fields
-    transformed_data.update({
-        "listening_session_id": self.generate_session_id(),
-        "user_timezone": self.get_user_timezone(),
-        "custom_tags": self.extract_custom_tags(track)
-    })
-    
-    return transformed_data
-```
-
-### Production Deployment
-
-For production environments:
-
-1. **Use AWS IAM roles** instead of access keys
-2. **Deploy on EC2/ECS** with appropriate IAM permissions
-3. **Set up CloudWatch monitoring** for logs and metrics
-4. **Configure S3 lifecycle policies** for cost optimization
-5. **Use AWS Secrets Manager** for credential management
-
-### Error Monitoring
-
-The pipeline includes structured logging. Integrate with your monitoring stack:
-
-```python
-import structlog
-
-logger = structlog.get_logger(__name__)
-# Logs are JSON formatted for easy parsing
-```
-
-## 📊 Monitoring & Analytics
-
-### Key Metrics to Monitor
-
-- **Processing Rate**: Tracks processed per hour
-- **API Rate Limits**: Spotify API usage
-- **S3 Upload Success Rate**: File upload reliability  
-- **Data Freshness**: Time lag between listening and ingestion
-- **Error Rates**: Failed requests and retries
-
-### Sample Queries
-
-```sql
--- Daily listening summary
+-- Your recent listening summary
 SELECT 
-    played_at_date,
-    COUNT(*) AS tracks_played,
-    COUNT(DISTINCT track_id) AS unique_tracks,
-    COUNT(DISTINCT primary_artist_name) AS unique_artists
-FROM spotify_listening_history 
-WHERE played_at_date >= CURRENT_DATE - 30
-GROUP BY played_at_date
-ORDER BY played_at_date;
+    denver_date,
+    total_plays,
+    unique_artists,
+    unique_genres,
+    mainstream_score,
+    genre_diversity_score,
+    average_listening_hour
+FROM gold_daily_listening_summary
+ORDER BY denver_date DESC
+LIMIT 7;
+```
 
--- Top artists this month
+### Genre Analysis
+```sql
+-- Top genres with actual top artists (not alphabetical!)
 SELECT 
-    primary_artist_name,
-    COUNT(*) AS play_count,
-    SUM(track_duration_ms) / 1000 / 60 AS total_minutes
-FROM spotify_listening_history 
-WHERE played_at_date >= DATE_TRUNC('MONTH', CURRENT_DATE)
-GROUP BY primary_artist_name
-ORDER BY play_count DESC
+    primary_genre,
+    total_plays,
+    top_artist,
+    top_artist_plays,
+    percentage_of_total_listening,
+    average_artist_popularity
+FROM gold_genre_analysis_complete
+ORDER BY total_plays DESC
 LIMIT 10;
 ```
 
-## 🚨 Troubleshooting
+### Monthly Trends
+```sql
+-- Monthly listening evolution with growth metrics
+SELECT 
+    year,
+    month_name,
+    total_plays,
+    top_artist,
+    top_genre,
+    plays_growth_rate,
+    mainstream_tendency
+FROM gold_monthly_insights_complete
+ORDER BY year DESC, month DESC
+LIMIT 12;
+```
+
+### Natural Language Examples
+```sql
+-- Ask questions conversationally
+SELECT SNOWFLAKE.CORTEX.ANALYST(
+    @semantic_models/spotify_semantic_model.yml,
+    'How many songs did I listen to yesterday?'
+);
+
+SELECT SNOWFLAKE.CORTEX.ANALYST(
+    @semantic_models/spotify_semantic_model.yml,
+    'Who is my top country artist and how many times have I played them?'
+);
+
+SELECT SNOWFLAKE.CORTEX.ANALYST(
+    @semantic_models/spotify_semantic_model.yml,
+    'Show me my listening trends over the past 3 months'
+);
+```
+
+## 🔄 GitHub Actions Automation
+
+### Setup Automated Collection
+1. **Fork this repository** on GitHub
+2. **Add secrets** to your repo settings:
+   ```
+   SPOTIFY_CLIENT_ID
+   SPOTIFY_CLIENT_SECRET
+   AWS_ACCESS_KEY_ID
+   AWS_SECRET_ACCESS_KEY
+   S3_BUCKET_NAME
+   ```
+3. **Enable GitHub Actions** - your data will be collected automatically every day at 9 AM!
+
+### Workflow Features
+- ✅ **Daily Collection**: Automated data gathering
+- ✅ **Genre Processing**: Enhanced artist genre data
+- ✅ **Error Handling**: Notifications on failures
+- ✅ **Statistics Reporting**: Daily collection summaries
+
+## 🛠️ Architecture
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Spotify API   │───▶│  Python Pipeline │───▶│   Amazon S3     │
+│   (OAuth 2.0)   │    │   (Enhanced)     │    │  (Partitioned)  │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+                                │                        │
+                                ▼                        ▼
+                       ┌─────────────────┐    ┌─────────────────┐
+                       │ Genre AI Engine │    │   Snowflake     │
+                       │  (Enhancement)  │    │  (Data Warehouse)│
+                       └─────────────────┘    └─────────────────┘
+                                                        │
+                                                        ▼
+                              ┌─────────────────────────────────────┐
+                              │        Medallion Architecture       │
+                              │  Bronze ───▶ Silver ───▶ Gold      │
+                              │   (Raw)     (Enhanced)  (Analytics) │
+                              └─────────────────────────────────────┘
+                                                        │
+                                                        ▼
+                              ┌─────────────────────────────────────┐
+                              │       Natural Language Queries      │
+                              │    "What's my most played genre?"   │
+                              │         (Cortex Analyst)            │
+                              └─────────────────────────────────────┘
+```
+
+## 🧠 Genre Enhancement Engine
+
+### How It Works
+1. **Spotify Data**: Extracts genre arrays from artist profiles
+2. **Gap Detection**: Identifies artists with empty genre arrays (~30% of artists)
+3. **AI Enhancement**: Uses multiple inference strategies:
+   - **Name Pattern Analysis**: "DJ" → "electronic", "& The" → "band"
+   - **Popularity Mapping**: High popularity + followers → "mainstream pop"
+   - **Fallback Classification**: "unclassified" for unclear cases
+4. **Source Tracking**: Maintains data lineage (Spotify vs AI-enhanced)
+
+### Enhancement Statistics
+- **Coverage**: 100% genre classification (vs ~70% from Spotify alone)
+- **Accuracy**: Pattern-based inference with conservative fallbacks
+- **Transparency**: Clear distinction between original and enhanced data
+
+## 📊 Monitoring & Observability
+
+### Built-in Monitoring
+```bash
+# Check pipeline health
+python main.py stats --enable-artist-genre-processing
+
+# Output includes:
+# • Total tracks collected
+# • Artists processed
+# • Genre enhancement statistics
+# • S3 upload metrics
+# • Error rates and retry statistics
+```
+
+### Snowflake Monitoring
+```sql
+-- Pipeline health dashboard
+SELECT 
+    'Listening Events' as metric,
+    COUNT(*) as value,
+    MAX(ingested_at) as last_updated
+FROM raw_data.spotify_listening_history
+
+UNION ALL
+
+SELECT 
+    'Artist Genres',
+    COUNT(*),
+    MAX(ingested_at)
+FROM raw_data.spotify_artist_genres
+
+UNION ALL
+
+SELECT 
+    'Daily Summaries',
+    COUNT(*),
+    MAX(last_updated)
+FROM gold_daily_listening_summary;
+```
+
+## 🔧 Troubleshooting
 
 ### Common Issues
 
 **Authentication Errors**
-- Verify Spotify app redirect URI matches exactly
-- Check that all required scopes are enabled
-- Clear `.spotify_cache` and re-authenticate
+```bash
+# Clear cached tokens and re-authenticate
+rm .spotify_cache
+python main.py run-once
+```
 
-**S3 Upload Failures**  
-- Verify AWS credentials and bucket permissions
-- Check bucket exists and region matches
-- Ensure S3 bucket policy allows PutObject
+**Missing Genre Data**
+```bash
+# Force reprocess specific artists
+python main.py process-artists --artists "artist_id_here"
 
-**Missing Data**
-- Spotify API only provides ~50 days of history
-- Check pipeline state file for last processed timestamp
-- Use backfill command to catch missed data
+# Bulk reprocess artists with empty genres
+python main.py backfill-artists --days 30
+```
 
-**Rate Limiting**
-- Pipeline includes built-in rate limiting (60 req/min)
-- Increase `FETCH_INTERVAL_MINUTES` if hitting limits
-- Monitor Spotify API quota in developer dashboard
+**Snowflake Dynamic Table Issues**
+```sql
+-- Manual refresh if tables seem stale
+ALTER DYNAMIC TABLE gold_daily_listening_summary REFRESH;
+ALTER DYNAMIC TABLE silver_listening_enriched REFRESH;
+```
+
+**S3 Permission Issues**
+```bash
+# Verify AWS credentials and bucket access
+aws s3 ls s3://your-bucket-name
+python main.py test
+```
 
 ### Debug Mode
-
-Enable verbose logging by setting log level:
-
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
+```bash
+# Enable verbose logging
+export LOG_LEVEL=DEBUG
+python main.py run-once --enable-artist-genre-processing
 ```
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Submit a pull request
+We welcome contributions! Here's how:
+
+1. **Fork** the repository
+2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
+3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
+4. **Push** to the branch (`git push origin feature/amazing-feature`)
+5. **Open** a Pull Request
+
+### Development Setup
+```bash
+# Install development dependencies
+pip install -r requirements.txt
+pip install pytest black flake8
+
+# Run tests
+pytest tests/
+
+# Format code
+black .
+flake8 .
+```
 
 ## 📄 License
 
-MIT License - see LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙋‍♀️ Support
+## 🙏 Acknowledgments
 
-- 📚 Check the troubleshooting section above
-- 🐛 Open an issue for bugs or feature requests  
-- 💬 Start a discussion for usage questions
+- **Spotify Web API** for providing comprehensive listening data
+- **Snowflake** for powerful data warehousing and analytics capabilities
+- **OpenAI/Anthropic** for inspiring the natural language query features
+- **The Python Community** for excellent libraries that make this possible
+
+## 📚 Additional Resources
+
+- **📖 Complete Setup Guide**: [QUICK_START.md](QUICK_START.md)
+- **🎯 Example Queries**: [SQL Examples](examples/)
+- **🐛 Issue Tracker**: [GitHub Issues](https://github.com/your-username/spotify-snowflake-pipeline/issues)
+- **💬 Discussions**: [GitHub Discussions](https://github.com/your-username/spotify-snowflake-pipeline/discussions)
+- **📊 Spotify API Docs**: [Developer Documentation](https://developer.spotify.com/documentation/web-api/)
+- **❄️ Snowflake Docs**: [Data Cloud Documentation](https://docs.snowflake.com/)
 
 ---
 
-**Happy analyzing your music! 🎵📊** 
+**Transform your Spotify listening into actionable insights! 🎵📊**
+
+*Your personal music analytics journey starts here.*
