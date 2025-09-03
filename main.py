@@ -96,6 +96,16 @@ def main():
         help="Test connections and configuration"
     )
     
+    # Process specific artists command
+    process_artists_parser = subparsers.add_parser(
+        "process-artists",
+        help="Process specific artist IDs for genre data"
+    )
+    process_artists_parser.add_argument(
+        "artist_ids",
+        help="Comma-separated list of Spotify artist IDs"
+    )
+    
     args = parser.parse_args()
     
     if not args.command:
@@ -174,6 +184,39 @@ def main():
                 sys.exit(1)
             
             print("✅ All tests passed!")
+            
+        elif args.command == "process-artists":
+            if not args.enable_artist_genre_processing:
+                print("❌ Artist-genre processing must be enabled with --enable-artist-genre-processing")
+                sys.exit(1)
+            
+            print(f"🎭 Processing specific artists: {args.artist_ids}")
+            
+            # Parse artist IDs
+            artist_ids = [aid.strip() for aid in args.artist_ids.split(',') if aid.strip()]
+            
+            if not artist_ids:
+                print("❌ No valid artist IDs provided")
+                sys.exit(1)
+            
+            print(f"📝 Found {len(artist_ids)} artist IDs to process")
+            
+            # Process the artists
+            try:
+                processed_artists = pipeline.artist_genre_processor.process_artist_batch(artist_ids)
+                
+                if processed_artists:
+                    # Upload to S3
+                    s3_key = pipeline.artist_genre_processor.upload_artists_to_s3(processed_artists)
+                    print(f"✅ Successfully processed {len(processed_artists)} artists")
+                    print(f"📤 Uploaded to S3: {s3_key}")
+                else:
+                    print("⚠️ No artists were successfully processed")
+                    
+            except Exception as e:
+                logger.error("Failed to process artists", error=str(e))
+                print(f"❌ Failed to process artists: {e}")
+                sys.exit(1)
     
     except KeyboardInterrupt:
         logger.info("Received interrupt signal")

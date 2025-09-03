@@ -322,12 +322,13 @@ class SpotifyClient:
         logger.info("Completed artist batch fetching", total_fetched=len(all_artists))
         return all_artists
     
-    def transform_artist_data(self, artist: Dict) -> Dict:
+    def transform_artist_data(self, artist: Dict, enhance_empty_genres: bool = True) -> Dict:
         """
         Transform artist data into Snowflake-friendly format.
         
         Args:
             artist: Raw artist data from Spotify API
+            enhance_empty_genres: Whether to enhance artists with empty genres
             
         Returns:
             Transformed artist data with genres
@@ -335,7 +336,21 @@ class SpotifyClient:
         genres = artist.get("genres", [])
         followers = artist.get("followers", {})
         
-        return {
+        # Enhanced genre processing for empty genres
+        data_source = "spotify_artist_api"
+        genre_inference_methods = None
+        original_genres_empty = False
+        
+        if enhance_empty_genres and not genres:
+            # Try to infer genres for artists with empty genre arrays
+            enhanced_artist = self._enhance_empty_genres(artist)
+            genres = enhanced_artist.get("genres", [])
+            genre_inference_methods = enhanced_artist.get("genre_inference_methods")
+            original_genres_empty = enhanced_artist.get("original_genres_empty", False)
+            if genre_inference_methods:
+                data_source = f"spotify_artist_api_enhanced_{'+'.join(genre_inference_methods)}"
+        
+        result = {
             "artist_id": artist.get("id"),
             "artist_name": artist.get("name"),
             "artist_uri": artist.get("uri"),
@@ -348,5 +363,122 @@ class SpotifyClient:
             "external_urls": json.dumps(artist.get("external_urls", {})),
             "images": json.dumps(artist.get("images", [])),
             "ingested_at": datetime.now(timezone.utc).isoformat(),
-            "data_source": "spotify_artist_api"
+            "data_source": data_source
         }
+        
+        # Add enhancement metadata if genres were inferred
+        if original_genres_empty:
+            result["original_genres_empty"] = True
+            if genre_inference_methods:
+                result["genre_inference_methods"] = json.dumps(genre_inference_methods)
+        
+        return result
+    
+    def _enhance_empty_genres(self, artist: Dict) -> Dict:
+        """
+        Enhance artist with inferred genres when original genres are empty.
+        
+        Args:
+            artist: Raw artist data from Spotify API
+            
+        Returns:
+            Enhanced artist data with inferred genres
+        """
+        original_genres = artist.get("genres", [])
+        
+        # If we already have genres, return as-is
+        if original_genres:
+            return artist
+        
+        # Try to infer genres using various strategies
+        inferred_genres = []
+        inference_methods = []
+        
+        # Strategy 1: Name-based inference
+        name_genre = self._infer_genre_from_name(artist.get("name", ""))
+        if name_genre:
+            inferred_genres.append(name_genre)
+            inference_methods.append("name_pattern")
+        
+        # Strategy 2: Popularity-based inference
+        popularity = artist.get("popularity")
+        followers = artist.get("followers", {}).get("total")
+        popularity_genre = self._infer_genre_from_popularity(popularity, followers)
+        if popularity_genre and popularity_genre not in inferred_genres:
+            inferred_genres.append(popularity_genre)
+            inference_methods.append("popularity_analysis")
+        
+        # If we inferred any genres, update the artist data
+        if inferred_genres:
+            enhanced_data = artist.copy()
+            enhanced_data["genres"] = inferred_genres
+            enhanced_data["genre_inference_methods"] = inference_methods
+            enhanced_data["original_genres_empty"] = True
+            
+            logger.info("Enhanced artist with inferred genres",
+                       artist_name=artist.get("name"),
+                       artist_id=artist.get("id"),
+                       inferred_genres=inferred_genres,
+                       methods=inference_methods)
+            
+            return enhanced_data
+        
+        # If no genres could be inferred, add a generic classification
+        enhanced_data = artist.copy()
+        enhanced_data["genres"] = ["unclassified"]
+        enhanced_data["genre_inference_methods"] = ["fallback"]
+        enhanced_data["original_genres_empty"] = True
+        
+        logger.warning("Could not infer genres for artist",
+                      artist_name=artist.get("name"),
+                      artist_id=artist.get("id"),
+                      popularity=popularity,
+                      followers=followers)
+        
+        return enhanced_data
+    
+    def _infer_genre_from_name(self, artist_name: str) -> Optional[str]:
+        """Infer genre from artist name patterns."""
+        if not artist_name:
+            return None
+            
+        name_lower = artist_name.lower()
+        
+        # Common genre mappings based on artist name patterns
+        genre_patterns = {
+            'electronic': ['dj ', 'dj_', 'electronic', 'edm', 'house', 'techno', 'trance'],
+            'hip hop': ['lil ', 'young ', 'big ', 'rapper', 'mc ', 'hip hop', 'rap'],
+            'rock': ['band', 'rock', 'metal', 'punk'],
+            'pop': ['pop', 'mainstream'],
+            'indie': ['indie', 'alternative'],
+            'country': ['country', 'nashville'],
+            'jazz': ['jazz', 'blues'],
+            'classical': ['orchestra', 'symphony', 'classical'],
+            'latin': ['latin', 'spanish', 'reggaeton'],
+            'r&b': ['r&b', 'soul', 'rnb']
+        }
+        
+        # Check for common patterns
+        for genre, patterns in genre_patterns.items():
+            for pattern in patterns:
+                if pattern in name_lower:
+                    return genre
+        
+        return None
+    
+    def _infer_genre_from_popularity(self, popularity: int, followers: int) -> Optional[str]:
+        """Infer genre based on popularity and follower count."""
+        if popularity is None:
+            return None
+            
+        # Popularity-based genre inference
+        if popularity >= 80:
+            return 'mainstream pop'
+        elif popularity >= 60:
+            return 'pop'
+        elif popularity >= 40:
+            return 'alternative'
+        elif popularity >= 20:
+            return 'indie'
+        else:
+            return 'underground'

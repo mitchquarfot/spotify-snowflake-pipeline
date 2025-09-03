@@ -418,8 +418,7 @@ AS (
         -- Artist diversity
         ROUND(AVG(se.artist_popularity), 1) as average_artist_popularity,
         ROUND(AVG(se.artist_followers), 0) as average_artist_followers,
-        -- FIXED: Use helper view for actual top artist
-        COALESCE(ta.top_artist_name, 'Unknown') as top_artist,
+        MIN(se.primary_artist_name) as top_artist,
         COUNT(*) as top_artist_plays,
         
         -- Temporal patterns
