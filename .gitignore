@@ -2,4 +2,6 @@
 .env_template.txt
 .spotify_cache
 .DS_Store
+__pycache__/venv/
+venv/
 __pycache__/
