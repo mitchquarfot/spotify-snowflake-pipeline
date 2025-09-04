@@ -12,6 +12,9 @@ USE SCHEMA medallion_arch;
 -- REFRESH DYNAMIC TABLES IN DEPENDENCY ORDER
 -- =============================================================================
 
+-- Step 0: Refresh Raw Data (in deduped table)
+alter dynamic table raw_data.spotify_mt_listening_deduped refresh;
+
 -- Step 1: Refresh Bronze Layer (depends on raw data)
 SELECT 'Refreshing Bronze Layer...' as status;
 
