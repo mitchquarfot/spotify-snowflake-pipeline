@@ -124,7 +124,7 @@ AS (
         EXTRACT(MONTH FROM h.denver_ts) as denver_month,
         EXTRACT(YEAR FROM h.denver_ts) as denver_year,
         EXTRACT(QUARTER FROM h.denver_ts) as denver_quarter,
-        CASE WHEN DAYOFWEEK(h.denver_ts) IN (1, 7) THEN TRUE ELSE FALSE END as is_weekend,
+        CASE WHEN DAYOFWEEK(h.denver_ts) IN (0,6) THEN TRUE ELSE FALSE END as is_weekend,
         CASE 
             WHEN EXTRACT(HOUR FROM h.denver_ts) BETWEEN 6 AND 11 THEN 'Morning'
             WHEN EXTRACT(HOUR FROM h.denver_ts) BETWEEN 12 AND 17 THEN 'Afternoon'
