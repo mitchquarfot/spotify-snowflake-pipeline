@@ -565,7 +565,7 @@ AS (
 -- Current month snapshot (using max date from data instead of CURRENT_DATE)
 CREATE OR REPLACE VIEW current_month_snapshot AS
 WITH max_date AS (
-    SELECT MAX(denver_date) as latest_date FROM silver_listening_enriched
+    SELECT MAX(denver_date)::DATE as latest_date FROM silver_listening_enriched
 )
 SELECT gmi.* 
 FROM gold_monthly_insights gmi, max_date md
@@ -575,7 +575,7 @@ WHERE gmi.year = EXTRACT(YEAR FROM md.latest_date)
 -- Recent listening activity (last 7 days from max date in data)
 CREATE OR REPLACE VIEW recent_activity AS
 WITH max_date AS (
-    SELECT MAX(denver_date) as latest_date FROM silver_listening_enriched
+    SELECT MAX(denver_date)::DATE as latest_date FROM silver_listening_enriched
 )
 SELECT 
     se.denver_timestamp,
@@ -593,7 +593,7 @@ LIMIT 100;
 -- Top discoveries this month (using max date from data)
 CREATE OR REPLACE VIEW monthly_discoveries AS
 WITH max_date AS (
-    SELECT MAX(denver_date) as latest_date FROM silver_listening_enriched
+    SELECT MAX(denver_date)::DATE as latest_date FROM silver_listening_enriched
 )
 SELECT 
     se.primary_artist_name,
@@ -614,7 +614,7 @@ ORDER BY plays_this_month DESC;
 -- Genre progression over time (last 6 months from max date)
 CREATE OR REPLACE VIEW genre_timeline AS
 WITH max_date AS (
-    SELECT MAX(denver_date) as latest_date FROM silver_listening_enriched
+    SELECT MAX(denver_date)::DATE as latest_date FROM silver_listening_enriched
 )
 SELECT 
     se.denver_date,

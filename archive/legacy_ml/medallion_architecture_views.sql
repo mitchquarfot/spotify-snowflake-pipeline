@@ -404,6 +404,24 @@ CREATE OR REPLACE DYNAMIC TABLE gold_genre_analysis(
   INITIALIZE = ON_CREATE 
   WAREHOUSE = SPOTIFY_WH
 AS (
+    WITH genre_artist_plays AS (
+        SELECT 
+            se.primary_genre,
+            se.primary_artist_name,
+            COUNT(*) as artist_plays_in_genre,
+            ROW_NUMBER() OVER (PARTITION BY se.primary_genre ORDER BY COUNT(*) DESC, se.primary_artist_name) as artist_rank_in_genre
+        FROM silver_listening_enriched se
+        WHERE se.primary_genre IS NOT NULL
+        GROUP BY se.primary_genre, se.primary_artist_name
+    ),
+    genre_top_artists AS (
+        SELECT 
+            primary_genre,
+            primary_artist_name as top_artist,
+            artist_plays_in_genre as top_artist_plays
+        FROM genre_artist_plays 
+        WHERE artist_rank_in_genre = 1
+    )
     SELECT 
         se.primary_genre,
         ROW_NUMBER() OVER (ORDER BY COUNT(*) DESC) as genre_rank,
@@ -418,9 +436,9 @@ AS (
         -- Artist diversity
         ROUND(AVG(se.artist_popularity), 1) as average_artist_popularity,
         ROUND(AVG(se.artist_followers), 0) as average_artist_followers,
-        -- FIXED: Use helper view for actual top artist
-        COALESCE(ta.top_artist_name, 'Unknown') as top_artist,
-        COUNT(*) as top_artist_plays,
+        -- Top artist (actual most-played artist in each genre)
+        gta.top_artist,
+        gta.top_artist_plays,
         
         -- Temporal patterns
         -- Note: These are simplified since we can't use MODE() in dynamic tables
@@ -441,8 +459,9 @@ AS (
         MAX(se.ingested_at) as last_updated
         
     FROM silver_listening_enriched se
+    LEFT JOIN genre_top_artists gta ON se.primary_genre = gta.primary_genre
     WHERE se.primary_genre IS NOT NULL
-    GROUP BY se.primary_genre
+    GROUP BY se.primary_genre, gta.top_artist, gta.top_artist_plays
     ORDER BY total_plays DESC
 );
 
@@ -566,7 +585,7 @@ AS (
 -- Current month snapshot (using max date from data instead of CURRENT_DATE)
 CREATE OR REPLACE VIEW current_month_snapshot AS
 WITH max_date AS (
-    SELECT MAX(denver_date) as latest_date FROM silver_listening_enriched
+    SELECT MAX(denver_date)::DATE as latest_date FROM silver_listening_enriched
 )
 SELECT gmi.* 
 FROM gold_monthly_insights gmi, max_date md
@@ -576,7 +595,7 @@ WHERE gmi.year = EXTRACT(YEAR FROM md.latest_date)
 -- Recent listening activity (last 7 days from max date in data)
 CREATE OR REPLACE VIEW recent_activity AS
 WITH max_date AS (
-    SELECT MAX(denver_date) as latest_date FROM silver_listening_enriched
+    SELECT MAX(denver_date)::DATE as latest_date FROM silver_listening_enriched
 )
 SELECT 
     se.denver_timestamp,
@@ -594,7 +613,7 @@ LIMIT 100;
 -- Top discoveries this month (using max date from data)
 CREATE OR REPLACE VIEW monthly_discoveries AS
 WITH max_date AS (
-    SELECT MAX(denver_date) as latest_date FROM silver_listening_enriched
+    SELECT MAX(denver_date)::DATE as latest_date FROM silver_listening_enriched
 )
 SELECT 
     se.primary_artist_name,
@@ -615,7 +634,7 @@ ORDER BY plays_this_month DESC;
 -- Genre progression over time (last 6 months from max date)
 CREATE OR REPLACE VIEW genre_timeline AS
 WITH max_date AS (
-    SELECT MAX(denver_date) as latest_date FROM silver_listening_enriched
+    SELECT MAX(denver_date)::DATE as latest_date FROM silver_listening_enriched
 )
 SELECT 
     se.denver_date,

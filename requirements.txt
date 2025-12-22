@@ -7,5 +7,9 @@ pandas==2.1.4
 pyarrow==14.0.2
 jsonlines==4.0.0
 pydantic==2.5.3
+pydantic-settings==2.1.0
 structlog==23.2.0
-tenacity==8.2.3 
+tenacity==8.2.3
+# ML helper dependencies
+numpy==1.26.4
+snowflake-connector-python==3.6.0

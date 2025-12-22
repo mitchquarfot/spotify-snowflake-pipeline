@@ -36,11 +36,22 @@ A comprehensive, production-ready pipeline that transforms your Spotify listenin
 - **📊 Semantic Model**: Rich metadata for accurate query interpretation
 - **💬 Example Queries**: Pre-verified questions for immediate insights
 
+### 🤖 AI-Powered Music Recommendations
+- **🧠 Multiple ML Algorithms**: Collaborative filtering, content-based, temporal patterns, discovery, and hybrid ensemble
+- **🎯 Personalized Discovery**: Find new artists and genres tailored to your taste
+- **⏰ Context-Aware**: Time-of-day and mood-based recommendations
+- **📊 Real-Time Generation**: On-demand playlist creation in Streamlit
+- **🔍 Advanced Discovery**: Hidden gems, genre exploration, and artist discovery
+- **🏗️ Snowflake Model Registry**: Production-grade ML model management and versioning
+- **🔄 Automated Retraining**: Self-monitoring system with performance tracking
+
 ### 🔄 Automation & CI/CD
 - **🚀 GitHub Actions**: Automated daily data collection
 - **📈 Pipeline Monitoring**: Track collection statistics and data quality
 - **🔧 Health Checks**: Automated testing and validation
 - **📧 Notifications**: Pipeline status and error reporting
+- **🤖 ML Automation**: Automated model monitoring, retraining, and deployment
+- **🛡️ Keep-Alive Script**: [`scripts/trigger_actions_keepalive.sh`](scripts/trigger_actions_keepalive.sh) + [`docs/github_actions_keepalive.md`](docs/github_actions_keepalive.md) show how to trigger a `workflow_dispatch` run via cron (e.g., first Monday of the month at noon MT) so GitHub never disables the scheduled workflow due to inactivity.
 
 ## 📊 Data Schema & Analytics
 
@@ -204,7 +215,26 @@ CREATE SCHEMA medallion_arch;
 -- Provides gold_*_complete views with accurate rankings
 ```
 
-### 4. Natural Language Querying
+### 4. AI-Powered ML Recommendations 🤖
+```sql
+-- Deploy the complete ML recommendation system
+-- File: spotify_ml_recommendation_engine.sql
+-- File: automated_model_retraining.sql
+-- File: model_inference_functions.sql
+
+-- Quick deployment:
+-- 1. Execute all SQL files in Snowflake
+-- 2. Run: CALL initialize_ml_automation();
+-- 3. Update Streamlit app with new ML tab
+
+-- Creates:
+-- ✅ 5 ML algorithms (collaborative, content-based, temporal, discovery, hybrid)
+-- ✅ Real-time recommendation functions
+-- ✅ Automated model monitoring and retraining
+-- ✅ Snowflake Model Registry integration
+```
+
+### 5. Natural Language Querying
 ```sql
 -- Upload semantic model for LLM integration
 CREATE STAGE semantic_models;
@@ -248,6 +278,24 @@ SELECT
 FROM gold_genre_analysis_complete
 ORDER BY total_plays DESC
 LIMIT 10;
+```
+
+### AI-Powered Recommendations 🤖
+```sql
+-- Get personalized recommendations (Hybrid AI)
+SELECT * FROM TABLE(get_spotify_recommendations(30));
+
+-- Discover new genres and artists
+SELECT * FROM TABLE(get_discovery_recommendations('balanced', 20, 70));
+
+-- Time-based recommendations
+SELECT * FROM TABLE(get_time_based_recommendations(14, false, 15));
+
+-- Find similar tracks to one you love
+SELECT * FROM TABLE(get_similar_tracks('4iV5W9uYEdYUVa79Axb7Rh', 10));
+
+-- Get your music taste profile
+SELECT * FROM TABLE(get_user_taste_profile());
 ```
 
 ### Monthly Trends

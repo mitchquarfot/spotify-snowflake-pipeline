@@ -28,6 +28,18 @@ class Settings(BaseSettings):
     snowflake_stage_prefix: str = Field("spotify_listening_history/", env="SNOWFLAKE_STAGE_PREFIX")
     date_partition_format: str = Field("%Y/%m/%d", env="DATE_PARTITION_FORMAT")
 
+    # Snowflake configuration
+    snowflake_account: Optional[str] = Field(None, env="SNOWFLAKE_ACCOUNT")
+    snowflake_user: Optional[str] = Field(None, env="SNOWFLAKE_USER")
+    snowflake_password: Optional[str] = Field(None, env="SNOWFLAKE_PASSWORD")
+    snowflake_private_key_path: Optional[str] = Field(None, env="SNOWFLAKE_PRIVATE_KEY_PATH")
+    snowflake_private_key: Optional[str] = Field(None, env="SNOWFLAKE_PRIVATE_KEY")
+    snowflake_private_key_passphrase: Optional[str] = Field(None, env="SNOWFLAKE_PRIVATE_KEY_PASSPHRASE")
+    snowflake_warehouse: Optional[str] = Field(None, env="SNOWFLAKE_WAREHOUSE")
+    snowflake_database: str = Field("SPOTIFY_ANALYTICS", env="SNOWFLAKE_DATABASE")
+    snowflake_schema: str = Field("ANALYTICS", env="SNOWFLAKE_SCHEMA")
+    snowflake_role: Optional[str] = Field(None, env="SNOWFLAKE_ROLE")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
@@ -66,6 +78,22 @@ class Settings(BaseSettings):
                 self.snowflake_stage_prefix = settings.snowflake_stage_prefix
                 self.date_partition_format = settings.date_partition_format
         return PipelineConfig(self)
+
+    @property
+    def snowflake(self):
+        class SnowflakeConfig:
+            def __init__(self, settings):
+                self.account = settings.snowflake_account
+                self.user = settings.snowflake_user
+                self.password = settings.snowflake_password
+                self.private_key_path = settings.snowflake_private_key_path
+                self.private_key = settings.snowflake_private_key
+                self.private_key_passphrase = settings.snowflake_private_key_passphrase
+                self.warehouse = settings.snowflake_warehouse
+                self.database = settings.snowflake_database
+                self.schema = settings.snowflake_schema
+                self.role = settings.snowflake_role
+        return SnowflakeConfig(self)
 
 
 # Global settings instance

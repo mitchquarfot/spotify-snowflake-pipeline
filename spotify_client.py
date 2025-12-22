@@ -24,7 +24,7 @@ class SpotifyClient:
             client_id=settings.spotify.client_id,
             client_secret=settings.spotify.client_secret,
             redirect_uri=settings.spotify.redirect_uri,
-            scope="user-read-recently-played user-read-playback-state",
+            scope="user-read-recently-played user-read-playback-state user-library-read",
             cache_path=".spotify_cache"
         )
         
@@ -482,3 +482,42 @@ class SpotifyClient:
             return 'indie'
         else:
             return 'underground'
+    
+    def search(self, query: str, search_type: str = 'track', limit: int = 10) -> Dict:
+        """
+        Search Spotify catalog.
+        
+        Args:
+            query: Search query string
+            search_type: Type of search ('track', 'artist', 'album', etc.)
+            limit: Maximum number of results
+            
+        Returns:
+            Search results from Spotify API
+        """
+        try:
+            logger.info(f"Searching Spotify: {query} (type: {search_type})")
+            results = self.sp.search(q=query, type=search_type, limit=limit)
+            return results
+        except Exception as e:
+            logger.error(f"Error searching Spotify: {e}")
+            return {}
+    
+    def get_recommendations(self, **kwargs) -> Dict:
+        """
+        Get track recommendations from Spotify.
+        
+        Args:
+            **kwargs: Recommendation parameters (seed_artists, seed_tracks, 
+                     target_popularity, min_popularity, max_popularity, etc.)
+                     
+        Returns:
+            Recommendations from Spotify API
+        """
+        try:
+            logger.info(f"Getting Spotify recommendations with params: {kwargs}")
+            recommendations = self.sp.recommendations(**kwargs)
+            return recommendations
+        except Exception as e:
+            logger.error(f"Error getting recommendations: {e}")
+            return {'tracks': []}
