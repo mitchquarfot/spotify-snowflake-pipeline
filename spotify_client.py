@@ -119,8 +119,20 @@ class SpotifyClient:
             Individual track objects
         """
         after = since_timestamp
+        safety_counter = 0
+        max_iterations = 500  # Safety net to prevent infinite pagination loops
         
         while True:
+            safety_counter += 1
+            if safety_counter > max_iterations:
+                logger.error(
+                    "Pagination aborted due to exceeding safety limit",
+                    since_timestamp=since_timestamp,
+                    last_after=after,
+                    max_iterations=max_iterations
+                )
+                break
+            
             tracks = self.get_recent_tracks(
                 limit=settings.pipeline.batch_size,
                 after=after
@@ -140,13 +152,17 @@ class SpotifyClient:
                     last_track_time.replace("Z", "+00:00")
                 ).timestamp() * 1000
             )
+            # Spotify's API can occasionally return multiple tracks with identical
+            # millisecond timestamps. Bump by one ms so we always make forward progress
+            # and avoid re-fetching the same page in a tight loop.
+            next_after = last_timestamp + 1
             
             # If we didn't get a full batch, we've reached the end
             if len(tracks) < settings.pipeline.batch_size:
                 logger.info("Reached end of available tracks")
                 break
                 
-            after = last_timestamp
+            after = next_after
             
             # Rate limiting - Spotify allows 100 requests per minute
             time.sleep(0.6)  # ~60 requests per minute to be safe
