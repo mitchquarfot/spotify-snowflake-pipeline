@@ -148,6 +148,7 @@ class SpotifyDataPipeline:
             Number of tracks processed
         """
         logger.info("Starting track fetch and process cycle")
+        print("🎧 Starting track fetch & process cycle", flush=True)
         
         # Get starting timestamp
         last_timestamp = self.get_last_processed_timestamp()
@@ -159,17 +160,31 @@ class SpotifyDataPipeline:
         
         processed_count = 0
         batch = []
+        start_time = datetime.now(timezone.utc)
+        max_runtime = None
+        if getattr(settings.pipeline, "max_runtime_minutes", None):
+            if settings.pipeline.max_runtime_minutes > 0:
+                max_runtime = timedelta(minutes=settings.pipeline.max_runtime_minutes)
         
         try:
             # Fetch tracks in batches
             for track in self.spotify_client.get_all_recent_tracks_since(last_timestamp):
                 batch.append(track)
                 
+                if max_runtime and datetime.now(timezone.utc) - start_time > max_runtime:
+                    logger.error(
+                        "Track fetch exceeded max runtime",
+                        processed_count=processed_count,
+                        max_runtime_minutes=settings.pipeline.max_runtime_minutes
+                    )
+                    raise TimeoutError("Track fetch exceeded configured max runtime")
+                
                 # Process batch when it reaches configured size
                 if len(batch) >= settings.pipeline.batch_size:
                     if self.process_batch(batch):
                         processed_count += len(batch)
                         batch = []
+                        print(f"📦 Processed batch, total tracks so far: {processed_count}", flush=True)
                     else:
                         logger.error("Failed to process batch, stopping")
                         break
@@ -178,6 +193,7 @@ class SpotifyDataPipeline:
             if batch:
                 if self.process_batch(batch):
                     processed_count += len(batch)
+                    print(f"📦 Processed final partial batch, total tracks: {processed_count}", flush=True)
         
         except Exception as e:
             logger.error("Error during track fetch and process", error=str(e))
@@ -190,31 +206,42 @@ class SpotifyDataPipeline:
                     logger.error("Failed to process final batch", error=str(batch_error))
         
         logger.info("Completed track fetch and process cycle", processed_count=processed_count)
+        print(f"✅ Completed track fetch & process cycle. Tracks processed: {processed_count}", flush=True)
         return processed_count
     
     def run_once(self) -> bool:
         """Run the pipeline once."""
         try:
             logger.info("Starting pipeline run")
+            print("🚀 Starting Spotify pipeline run", flush=True)
             
             # Authenticate with Spotify
+            print("🔐 Authenticating with Spotify...", flush=True)
             if not self.spotify_client.authenticate():
                 logger.error("Failed to authenticate with Spotify")
+                print("❌ Spotify authentication failed", flush=True)
                 return False
+            print("✅ Spotify authentication succeeded", flush=True)
             
             # Ensure S3 bucket exists
+            print(f"🪣 Ensuring S3 bucket '{self.s3_client.bucket_name}' exists...", flush=True)
             if not self.s3_client.ensure_bucket_exists():
                 logger.error("S3 bucket not accessible")
+                print("❌ S3 bucket not accessible", flush=True)
                 return False
+            print("✅ S3 bucket verified", flush=True)
             
             # Fetch and process new tracks
+            print("🎶 Fetching and processing new tracks...", flush=True)
             processed_count = self.fetch_and_process_new_tracks()
             
             logger.info("Pipeline run completed", processed_count=processed_count)
+            print(f"🏁 Pipeline run completed. Processed tracks: {processed_count}", flush=True)
             return True
             
         except Exception as e:
             logger.error("Pipeline run failed", error=str(e))
+            print(f"❌ Pipeline run failed: {e}", flush=True)
             return False
     
     def run_continuous(self):

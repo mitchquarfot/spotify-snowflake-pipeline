@@ -37,6 +37,7 @@ jobs:
         FETCH_INTERVAL_MINUTES=30
         BATCH_SIZE=50
         MAX_RETRIES=3
+        MAX_RUNTIME_MINUTES=20
         SNOWFLAKE_STAGE_PREFIX=spotify_listening_history/
         DATE_PARTITION_FORMAT=%Y/%m/%d
         EOF

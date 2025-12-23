@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     fetch_interval_minutes: int = Field(30, env="FETCH_INTERVAL_MINUTES")
     batch_size: int = Field(50, env="BATCH_SIZE")
     max_retries: int = Field(3, env="MAX_RETRIES")
+    max_runtime_minutes: int = Field(30, env="MAX_RUNTIME_MINUTES")
     snowflake_stage_prefix: str = Field("spotify_listening_history/", env="SNOWFLAKE_STAGE_PREFIX")
     date_partition_format: str = Field("%Y/%m/%d", env="DATE_PARTITION_FORMAT")
 
@@ -75,6 +76,7 @@ class Settings(BaseSettings):
                 self.fetch_interval_minutes = settings.fetch_interval_minutes
                 self.batch_size = settings.batch_size
                 self.max_retries = settings.max_retries
+                self.max_runtime_minutes = settings.max_runtime_minutes
                 self.snowflake_stage_prefix = settings.snowflake_stage_prefix
                 self.date_partition_format = settings.date_partition_format
         return PipelineConfig(self)
