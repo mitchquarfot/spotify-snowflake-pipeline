@@ -24,7 +24,12 @@ _base_processors = [
 # Configure dynamically so the pipeline keeps working across versions.
 _unicode_decoder = getattr(structlog.processors, "UnicodeDecoder", None)
 if _unicode_decoder:
-    _base_processors.append(_unicode_decoder())
+    # Older structlog exposes UnicodeDecoder as a function, newer versions as a class.
+    # Detect and append the appropriate callable without breaking either version.
+    if isinstance(_unicode_decoder, type):
+        _base_processors.append(_unicode_decoder())
+    else:
+        _base_processors.append(_unicode_decoder)
 
 _base_processors.append(structlog.processors.JSONRenderer())
 
