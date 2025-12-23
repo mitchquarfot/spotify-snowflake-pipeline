@@ -10,18 +10,26 @@ from dotenv import load_dotenv
 from pipeline import SpotifyDataPipeline
 
 # Configure structured logging
+_base_processors = [
+    structlog.stdlib.filter_by_level,
+    structlog.stdlib.add_logger_name,
+    structlog.stdlib.add_log_level,
+    structlog.stdlib.PositionalArgumentsFormatter(),
+    structlog.processors.TimeStamper(fmt="iso"),
+    structlog.processors.StackInfoRenderer(),
+    structlog.processors.format_exc_info,
+]
+
+# structlog dropped UnicodeDecoder in v24+, but older versions still expose it.
+# Configure dynamically so the pipeline keeps working across versions.
+_unicode_decoder = getattr(structlog.processors, "UnicodeDecoder", None)
+if _unicode_decoder:
+    _base_processors.append(_unicode_decoder())
+
+_base_processors.append(structlog.processors.JSONRenderer())
+
 structlog.configure(
-    processors=[
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.stdlib.PositionalArgumentsFormatter(),
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-        structlog.processors.UnicodeDecoder(),
-        structlog.processors.JSONRenderer()
-    ],
+    processors=_base_processors,
     context_class=dict,
     logger_factory=structlog.stdlib.LoggerFactory(),
     cache_logger_on_first_use=True,
