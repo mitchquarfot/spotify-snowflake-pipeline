@@ -40,18 +40,22 @@ class SpotifyClient:
         """Set up auth manager with stored refresh token."""
         try:
             # Create token info dict with refresh token
-            token_info = {
-                'refresh_token': settings.spotify.refresh_token,
-                'access_token': None,
-                'expires_at': 0,  # Force refresh
-                'scope': 'user-read-recently-played user-read-playback-state',
-                'token_type': 'Bearer'
-            }
-            
-            # Save token info to cache
+            # Force-refresh immediately so the auth manager has a valid access token
+            token_info = self.auth_manager.refresh_access_token(
+                settings.spotify.refresh_token
+            )
+            if not token_info or "access_token" not in token_info:
+                raise SpotifyOauthError("Failed to refresh access token")
             self.auth_manager.cache_handler.save_token_to_cache(token_info)
-            logger.info("Loaded refresh token from settings")
-            
+            logger.info("Refreshed Spotify access token using provided refresh token")
+        except SpotifyOauthError as e:
+            logger.error(
+                "Failed to refresh Spotify token with supplied refresh token",
+                error=str(e),
+                error_code=getattr(e, "error", None),
+                error_description=getattr(e, "error_description", None)
+            )
+            raise
         except Exception as e:
             logger.warning("Failed to set up refresh token", error=str(e))
     
