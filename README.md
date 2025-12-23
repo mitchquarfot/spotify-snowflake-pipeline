@@ -81,6 +81,13 @@ A comprehensive, production-ready pipeline that transforms your Spotify listenin
 
 ## 🚀 Quick Start
 
+### Repository Layout
+
+- `main.py`, `pipeline.py`, `spotify_client.py`, `s3_client.py` – core pipeline code
+- `ml_pipeline/` – optional Snowflake ML utilities kept for advanced workflows
+- `docs/` – operational guides, including the new [`docs/ARCHIVE.md`](docs/ARCHIVE.md) for retrieving legacy assets
+- `scripts/` – operational tooling (e.g. keep-alive cron helper)
+
 ### Option 1: Automated Setup (Recommended)
 ```bash
 # Clone the repository
@@ -105,8 +112,8 @@ chmod +x quick_start.sh
 # 1. Clone and setup environment
 git clone https://github.com/your-username/spotify-snowflake-pipeline.git
 cd spotify-snowflake-pipeline
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 
 # 2. Configure credentials
@@ -492,12 +499,16 @@ We welcome contributions! Here's how:
 
 ### Development Setup
 ```bash
-# Install development dependencies
+# Create an isolated environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install dependencies and tooling
 pip install -r requirements.txt
 pip install pytest black flake8
 
 # Run tests
-pytest tests/
+pytest
 
 # Format code
 black .
@@ -518,7 +529,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 📚 Additional Resources
 
 - **📖 Complete Setup Guide**: [QUICK_START.md](QUICK_START.md)
-- **🎯 Example Queries**: [SQL Examples](examples/)
+- **🗃️ Legacy Materials**: [docs/ARCHIVE.md](docs/ARCHIVE.md)
 - **🐛 Issue Tracker**: [GitHub Issues](https://github.com/your-username/spotify-snowflake-pipeline/issues)
 - **💬 Discussions**: [GitHub Discussions](https://github.com/your-username/spotify-snowflake-pipeline/discussions)
 - **📊 Spotify API Docs**: [Developer Documentation](https://developer.spotify.com/documentation/web-api/)
