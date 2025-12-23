@@ -37,6 +37,32 @@ class SpotifyDataPipeline:
         else:
             self.artist_genre_processor = None
             logger.info("Pipeline initialized")
+        
+        logger.info(
+            "Pipeline configuration",
+            s3_bucket=self.s3_client.bucket_name,
+            batch_size=settings.pipeline.batch_size,
+            fetch_interval_minutes=settings.pipeline.fetch_interval_minutes,
+            max_runtime_minutes=getattr(settings.pipeline, "max_runtime_minutes", None),
+            spotify_refresh_token_configured=bool(settings.spotify.refresh_token)
+        )
+        print(
+            "🛠️ Pipeline configuration: "
+            f"S3 bucket='{self.s3_client.bucket_name}', "
+            f"batch_size={settings.pipeline.batch_size}, "
+            f"fetch_interval={settings.pipeline.fetch_interval_minutes}m, "
+            f"max_runtime={getattr(settings.pipeline, 'max_runtime_minutes', None)}m, "
+            f"has_refresh_token={'yes' if settings.spotify.refresh_token else 'no'}",
+            flush=True
+        )
+        
+        if not settings.spotify.refresh_token:
+            warning_msg = (
+                "⚠️ SPOTIFY_REFRESH_TOKEN is missing. GitHub Actions runs require a refresh token. "
+                "Generate a fresh token locally and add it to the repository secrets."
+            )
+            logger.warning("Spotify refresh token missing")
+            print(warning_msg, flush=True)
     
     def load_state(self) -> Dict:
         """Load pipeline state from file."""

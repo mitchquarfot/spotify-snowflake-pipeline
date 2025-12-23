@@ -25,6 +25,25 @@ jobs:
         
     - name: Create .env file
       run: |
+        if [ -z "${{ secrets.SPOTIFY_CLIENT_ID }}" ]; then
+          echo "::error::Missing SPOTIFY_CLIENT_ID secret"; exit 1;
+        fi
+        if [ -z "${{ secrets.SPOTIFY_CLIENT_SECRET }}" ]; then
+          echo "::error::Missing SPOTIFY_CLIENT_SECRET secret"; exit 1;
+        fi
+        if [ -z "${{ secrets.SPOTIFY_REFRESH_TOKEN }}" ]; then
+          echo "::error::Missing SPOTIFY_REFRESH_TOKEN secret"; exit 1;
+        fi
+        if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+          echo "::error::Missing AWS_ACCESS_KEY_ID secret"; exit 1;
+        fi
+        if [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
+          echo "::error::Missing AWS_SECRET_ACCESS_KEY secret"; exit 1;
+        fi
+        if [ -z "${{ secrets.S3_BUCKET_NAME }}" ]; then
+          echo "::error::Missing S3_BUCKET_NAME secret"; exit 1;
+        fi
+        echo "✅ Required secrets detected"
         cat > .env << EOF
         SPOTIFY_CLIENT_ID=${{ secrets.SPOTIFY_CLIENT_ID }}
         SPOTIFY_CLIENT_SECRET=${{ secrets.SPOTIFY_CLIENT_SECRET }}

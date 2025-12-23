@@ -6,7 +6,7 @@ import os
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Generator
 import spotipy
-from spotipy.oauth2 import SpotifyOAuth
+from spotipy.oauth2 import SpotifyOAuth, SpotifyOauthError
 import structlog
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -25,7 +25,8 @@ class SpotifyClient:
             client_secret=settings.spotify.client_secret,
             redirect_uri=settings.spotify.redirect_uri,
             scope="user-read-recently-played user-read-playback-state user-library-read",
-            cache_path=".spotify_cache"
+            cache_path=".spotify_cache",
+            open_browser=False
         )
         
         # If we have a refresh token, use it
@@ -61,8 +62,18 @@ class SpotifyClient:
             self.sp.current_user()
             logger.info("Successfully authenticated with Spotify")
             return True
+        except SpotifyOauthError as e:
+            logger.error(
+                "Failed to authenticate with Spotify",
+                error=str(e),
+                error_code=getattr(e, "error", None),
+                error_description=getattr(e, "error_description", None)
+            )
+            print("❌ Spotify authentication error. Check refresh token and client credentials.", flush=True)
+            return False
         except Exception as e:
             logger.error("Failed to authenticate with Spotify", error=str(e))
+            print(f"❌ Spotify authentication exception: {e}", flush=True)
             return False
     
     @retry(
