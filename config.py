@@ -41,6 +41,32 @@ class Settings(BaseSettings):
     snowflake_schema: str = Field("ANALYTICS", env="SNOWFLAKE_SCHEMA")
     snowflake_role: Optional[str] = Field(None, env="SNOWFLAKE_ROLE")
 
+    # Snowflake pipeline state settings (for state table backing)
+    snowflake_state_database: str = Field("SPOTIFY_ANALYTICS", env="SNOWFLAKE_STATE_DATABASE")
+    snowflake_state_schema: str = Field("RAW_DATA", env="SNOWFLAKE_STATE_SCHEMA")
+    snowflake_state_table: str = Field("PIPELINE_STATE", env="SNOWFLAKE_STATE_TABLE")
+
+    # Last.fm API configuration
+    lastfm_api_key: Optional[str] = Field(None, env="LASTFM_API_KEY")
+    lastfm_api_secret: Optional[str] = Field(None, env="LASTFM_API_SECRET")
+    lastfm_rate_limit_per_sec: float = Field(5.0, env="LASTFM_RATE_LIMIT_PER_SEC")
+
+    # MusicBrainz configuration
+    musicbrainz_user_agent: str = Field(
+        "SpotifySnowflakePipeline/1.0 (mitch.quarfot@snowflake.com)",
+        env="MUSICBRAINZ_USER_AGENT",
+    )
+    musicbrainz_rate_limit_per_sec: float = Field(1.0, env="MUSICBRAINZ_RATE_LIMIT_PER_SEC")
+
+    # Rate limiting and backoff tunables
+    rate_limit_requests_per_minute: int = Field(100, env="RATE_LIMIT_REQUESTS_PER_MINUTE")
+    rate_limit_default_sleep_sec: float = Field(0.6, env="RATE_LIMIT_DEFAULT_SLEEP_SEC")
+    rate_limit_backoff_multiplier: float = Field(1.5, env="RATE_LIMIT_BACKOFF_MULTIPLIER")
+    rate_limit_max_backoff_sec: float = Field(120.0, env="RATE_LIMIT_MAX_BACKOFF_SEC")
+    rate_limit_circuit_breaker_threshold: int = Field(5, env="RATE_LIMIT_CIRCUIT_BREAKER_THRESHOLD")
+    rate_limit_circuit_breaker_pause_sec: float = Field(60.0, env="RATE_LIMIT_CIRCUIT_BREAKER_PAUSE_SEC")
+    token_refresh_margin_sec: int = Field(300, env="TOKEN_REFRESH_MARGIN_SEC")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
@@ -96,6 +122,39 @@ class Settings(BaseSettings):
                 self.schema = settings.snowflake_schema
                 self.role = settings.snowflake_role
         return SnowflakeConfig(self)
+
+    @property
+    def rate_limit(self):
+        """Rate limiting configuration namespace."""
+        class RateLimitConfig:
+            def __init__(self, settings):
+                self.requests_per_minute = settings.rate_limit_requests_per_minute
+                self.default_sleep_sec = settings.rate_limit_default_sleep_sec
+                self.backoff_multiplier = settings.rate_limit_backoff_multiplier
+                self.max_backoff_sec = settings.rate_limit_max_backoff_sec
+                self.circuit_breaker_threshold = settings.rate_limit_circuit_breaker_threshold
+                self.circuit_breaker_pause_sec = settings.rate_limit_circuit_breaker_pause_sec
+                self.token_refresh_margin_sec = settings.token_refresh_margin_sec
+        return RateLimitConfig(self)
+
+    @property
+    def lastfm(self):
+        """Last.fm configuration namespace."""
+        class LastfmConfig:
+            def __init__(self, settings):
+                self.api_key = settings.lastfm_api_key
+                self.api_secret = settings.lastfm_api_secret
+                self.rate_limit_per_sec = settings.lastfm_rate_limit_per_sec
+        return LastfmConfig(self)
+
+    @property
+    def musicbrainz(self):
+        """MusicBrainz configuration namespace."""
+        class MusicBrainzConfig:
+            def __init__(self, settings):
+                self.user_agent = settings.musicbrainz_user_agent
+                self.rate_limit_per_sec = settings.musicbrainz_rate_limit_per_sec
+        return MusicBrainzConfig(self)
 
 
 # Global settings instance

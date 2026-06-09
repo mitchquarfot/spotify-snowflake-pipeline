@@ -8,21 +8,21 @@ on:
 jobs:
   collect-spotify-data:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
-        
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install spotipy boto3 python-dotenv schedule requests structlog tenacity pydantic-settings jsonlines pandas pyarrow
-        
+        pip install -r requirements.txt
+
     - name: Create .env file
       run: |
         if [ -z "${{ secrets.SPOTIFY_CLIENT_ID }}" ]; then
@@ -43,7 +43,7 @@ jobs:
         if [ -z "${{ secrets.S3_BUCKET_NAME }}" ]; then
           echo "::error::Missing S3_BUCKET_NAME secret"; exit 1;
         fi
-        echo "✅ Required secrets detected"
+        echo "Required secrets detected"
         cat > .env << EOF
         SPOTIFY_CLIENT_ID=${{ secrets.SPOTIFY_CLIENT_ID }}
         SPOTIFY_CLIENT_SECRET=${{ secrets.SPOTIFY_CLIENT_SECRET }}
@@ -53,6 +53,13 @@ jobs:
         AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
         AWS_REGION=us-west-2
         S3_BUCKET_NAME=${{ secrets.S3_BUCKET_NAME }}
+        SNOWFLAKE_ACCOUNT=${{ secrets.SNOWFLAKE_ACCOUNT }}
+        SNOWFLAKE_USER=${{ secrets.SNOWFLAKE_USER }}
+        SNOWFLAKE_PASSWORD=${{ secrets.SNOWFLAKE_PASSWORD }}
+        SNOWFLAKE_WAREHOUSE=${{ secrets.SNOWFLAKE_WAREHOUSE }}
+        SNOWFLAKE_DATABASE=SPOTIFY_ANALYTICS
+        SNOWFLAKE_SCHEMA=RAW_DATA
+        SNOWFLAKE_ROLE=${{ secrets.SNOWFLAKE_ROLE }}
         FETCH_INTERVAL_MINUTES=30
         BATCH_SIZE=50
         MAX_RETRIES=3
@@ -60,11 +67,32 @@ jobs:
         SNOWFLAKE_STAGE_PREFIX=spotify_listening_history/
         DATE_PARTITION_FORMAT=%Y/%m/%d
         EOF
-        
+
     - name: Run Spotify data collection
       run: |
-        python main.py --enable-artist-genre-processing run-once
-        
+        python main.py --enable-artist-genre-processing run-once 2>&1 | tee pipeline_run.log
+
+    - name: Post-run health check
+      if: always()
+      run: |
+        python main.py health-check 2>&1 | tee -a pipeline_run.log
+
     - name: Show pipeline stats
+      if: success()
       run: |
         python main.py --enable-artist-genre-processing stats
+
+    - name: Upload pipeline logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: pipeline-logs-${{ github.run_id }}
+        path: pipeline_run.log
+        retention-days: 14
+
+    - name: Notify on failure
+      if: failure()
+      run: |
+        curl -X POST -H 'Content-type: application/json' \
+          --data '{"text":"Spotify pipeline FAILED: run ${{ github.run_id }} — <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View logs>"}' \
+          ${{ secrets.SLACK_WEBHOOK_URL }}

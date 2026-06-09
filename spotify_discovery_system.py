@@ -2,8 +2,6 @@
 Spotify Discovery System: Fetch NEW tracks from Spotify based on user listening patterns
 """
 import json
-import pandas as pd
-import numpy as np
 from typing import Dict, List, Tuple, Optional
 from datetime import datetime, timedelta
 from dataclasses import dataclass
@@ -12,7 +10,6 @@ from config import settings
 import os
 from spotify_client import SpotifyClient
 from s3_client import S3Client
-import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -135,9 +132,8 @@ class SpotifyDiscoveryEngine:
                             'primary_artist_id': track['artists'][0]['id'],
                             'album_name': track['album']['name'],
                             'album_release_date': track['album']['release_date'],
-                            'track_popularity': track['popularity'],
                             'track_duration_ms': track['duration_ms'],
-                            'preview_url': track['preview_url'],
+                            'preview_url': track.get('preview_url'),
                             'discovery_strategy': 'artist_based',
                             'seed_artist': artist_name,
                             'preference_score': preference,
@@ -172,9 +168,8 @@ class SpotifyDiscoveryEngine:
                             'primary_artist_id': track['artists'][0]['id'],
                             'album_name': track['album']['name'],
                             'album_release_date': track['album']['release_date'],
-                            'track_popularity': track['popularity'],
                             'track_duration_ms': track['duration_ms'],
-                            'preview_url': track['preview_url'],
+                            'preview_url': track.get('preview_url'),
                             'discovery_strategy': 'genre_based',
                             'seed_genre': genre,
                             'preference_score': preference,
@@ -270,7 +265,7 @@ class SpotifyDiscoveryEngine:
             'top_genres': profile.top_genres[:3],
             'top_artists': profile.top_artists[:3],
             'discovery_strategies': list(set(d['discovery_strategy'] for d in discoveries)),
-            'avg_popularity': np.mean([d['track_popularity'] for d in discoveries]),
+            'total_tracks_discovered': len(discoveries),
             'discovery_timestamp': datetime.now()
         }
         
@@ -288,7 +283,6 @@ def main():
     📊 Discovered {summary['total_discoveries']} new tracks
     🎭 Based on your top genres: {', '.join([g[0] for g in summary['top_genres']])}
     🎤 Based on your top artists: {', '.join([a[0] for a in summary['top_artists']])}
-    📈 Average popularity: {summary['avg_popularity']:.1f}
     ☁️  Saved to S3 - Snowpipe will auto-ingest!
     
     Next steps:

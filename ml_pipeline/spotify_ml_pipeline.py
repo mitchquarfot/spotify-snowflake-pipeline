@@ -42,7 +42,7 @@ class SnowflakeFeatureStore:
             play_count,
             unique_tracks,
             unique_artists,
-            avg_track_popularity,
+            avg_lastfm_listeners,
             last_listened_at
         FROM analytics.ml_genre_preference_features
         WHERE play_count >= %(min_plays)s
@@ -56,7 +56,7 @@ class SnowflakeFeatureStore:
             primary_artist_name,
             play_count,
             unique_tracks,
-            avg_track_popularity,
+            avg_lastfm_listeners,
             last_listened_at
         FROM analytics.ml_artist_preference_features
         WHERE play_count >= %(min_plays)s
@@ -77,11 +77,12 @@ class SnowflakeFeatureStore:
             c.primary_artist_name,
             c.source,
             c.seed_value,
-            c.track_popularity,
             c.album_release_date,
             c.fetched_at,
             gp.play_count AS genre_play_count,
-            ap.play_count AS artist_play_count
+            gp.avg_lastfm_listeners AS genre_avg_listeners,
+            ap.play_count AS artist_play_count,
+            ap.avg_lastfm_listeners AS artist_avg_listeners
         FROM analytics.ml_candidate_tracks c
         LEFT JOIN analytics.ml_genre_preference_features gp
             ON LOWER(c.seed_value) = LOWER(gp.primary_genre)
@@ -177,16 +178,24 @@ class SpotifyRecommender:
 
         candidates_df["GENRE_PLAY_COUNT"] = candidates_df["GENRE_PLAY_COUNT"].fillna(0)
         candidates_df["ARTIST_PLAY_COUNT"] = candidates_df["ARTIST_PLAY_COUNT"].fillna(0)
-        candidates_df["TRACK_POPULARITY"] = candidates_df["TRACK_POPULARITY"].fillna(0)
+        # Use Last.fm listeners as popularity proxy (log-scaled since listeners is unbounded)
+        candidates_df["GENRE_AVG_LISTENERS"] = candidates_df["GENRE_AVG_LISTENERS"].fillna(0)
+        candidates_df["ARTIST_AVG_LISTENERS"] = candidates_df["ARTIST_AVG_LISTENERS"].fillna(0)
 
         candidates_df["genre_rank"] = candidates_df["GENRE_PLAY_COUNT"].rank(method="average", pct=True)
         candidates_df["artist_rank"] = candidates_df["ARTIST_PLAY_COUNT"].rank(method="average", pct=True)
-        candidates_df["popularity_norm"] = candidates_df["TRACK_POPULARITY"] / 100.0
+        # Log-scale listeners for normalization (ln(1+x) avoids log(0), then percentile-rank)
+        import numpy as np
+        candidates_df["listeners_combined"] = (
+            candidates_df["GENRE_AVG_LISTENERS"] + candidates_df["ARTIST_AVG_LISTENERS"]
+        )
+        candidates_df["listeners_log"] = np.log1p(candidates_df["listeners_combined"])
+        candidates_df["listeners_rank"] = candidates_df["listeners_log"].rank(method="average", pct=True)
 
         candidates_df["score"] = (
-            0.5 * candidates_df["genre_rank"]
-            + 0.3 * candidates_df["artist_rank"]
-            + 0.2 * candidates_df["popularity_norm"]
+            0.45 * candidates_df["genre_rank"]
+            + 0.30 * candidates_df["artist_rank"]
+            + 0.25 * candidates_df["listeners_rank"]
         )
 
         top_df = candidates_df.sort_values("score", ascending=False).head(total_candidates)

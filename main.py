@@ -103,6 +103,12 @@ def main():
         help="Show pipeline statistics"
     )
     
+    # Health check command
+    health_check_parser = subparsers.add_parser(
+        "health-check",
+        help="Check pipeline health via Snowflake state and monitoring tables"
+    )
+
     # Test command
     test_parser = subparsers.add_parser(
         "test",
@@ -176,6 +182,15 @@ def main():
             else:
                 print(f"\n🎭 Artist Genre Processing: Disabled")
         
+        elif args.command == "health-check":
+            logger.info("Running health check")
+            result = pipeline.health_check()
+            status_icon = "HEALTHY" if result["healthy"] else "UNHEALTHY"
+            print(f"\nPipeline Health: {status_icon}")
+            for check_name, check_detail in result.get("checks", {}).items():
+                print(f"  {check_name}: {check_detail}")
+            sys.exit(0 if result["healthy"] else 1)
+
         elif args.command == "test":
             logger.info("Testing connections")
             print("🔍 Testing connections...")

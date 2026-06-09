@@ -54,7 +54,6 @@ WHEN MATCHED THEN UPDATE SET
     primary_artist_name = source.primary_artist_name,
     source = source.source,
     seed_value = source.seed_value,
-    track_popularity = source.track_popularity,
     album_release_date = source.album_release_date,
     fetched_at = source.fetched_at,
     raw_payload = source.raw_payload
@@ -65,7 +64,6 @@ WHEN NOT MATCHED THEN INSERT (
     primary_artist_name,
     source,
     seed_value,
-    track_popularity,
     album_release_date,
     fetched_at,
     raw_payload
@@ -76,7 +74,6 @@ WHEN NOT MATCHED THEN INSERT (
     source.primary_artist_name,
     source.source,
     source.seed_value,
-    source.track_popularity,
     source.album_release_date,
     source.fetched_at,
     source.raw_payload
@@ -175,6 +172,7 @@ class CandidateSync:
         print(f"✅ Loaded {len(df)} candidate tracks into analytics.ml_candidate_tracks")
 
     def _transform_track(self, track: Dict, source: str, seed_value: str) -> Dict:
+        # track_popularity removed: Spotify API no longer returns track.popularity
         return {
             "track_id": track["id"],
             "track_name": track["name"],
@@ -182,7 +180,6 @@ class CandidateSync:
             "primary_artist_name": track["artists"][0]["name"],
             "source": source,
             "seed_value": seed_value,
-            "track_popularity": track.get("popularity"),
             "album_release_date": track.get("album", {}).get("release_date"),
             "fetched_at": pd.Timestamp.utcnow(),
             "raw_payload": json.dumps(track),
@@ -200,12 +197,11 @@ class CandidateSync:
                     primary_artist_name,
                     source,
                     seed_value,
-                    track_popularity,
                     album_release_date,
                     fetched_at,
                     raw_payload
                 ) VALUES (%(track_id)s, %(track_name)s, %(primary_artist_id)s, %(primary_artist_name)s,
-                          %(source)s, %(seed_value)s, %(track_popularity)s, %(album_release_date)s,
+                          %(source)s, %(seed_value)s, %(album_release_date)s,
                           %(fetched_at)s, %(raw_payload)s)
             """
             rows = df.to_dict(orient="records")

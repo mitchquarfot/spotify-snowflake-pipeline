@@ -12,7 +12,6 @@ SELECT
     r.track_id,
     r.track_name,
     r.track_duration_ms,
-    r.track_popularity,
     r.track_explicit,
     r.track_preview_url,
     r.track_external_urls,
@@ -22,8 +21,9 @@ SELECT
     ag.primary_genre,
     ag.genres_list,
     ag.genre_count,
-    ag.popularity        AS artist_popularity,
-    ag.followers_total   AS artist_followers,
+    -- Popularity proxy from Last.fm listeners (replaces removed Spotify popularity/followers)
+    lfm.listeners       AS lastfm_listeners,
+    lfm.playcount       AS lastfm_playcount,
     r.album_id,
     r.album_name,
     r.album_type,
@@ -36,18 +36,20 @@ SELECT
     r.data_source
 FROM raw_data.spotify_mt_listening_deduped r
 LEFT JOIN raw_data.spotify_artist_genres ag
-  ON r.primary_artist_id = ag.artist_id;
+  ON r.primary_artist_id = ag.artist_id
+LEFT JOIN raw_data.lastfm_enrichment lfm
+  ON ag.artist_name = lfm.artist_name;
 
 CREATE OR REPLACE VIEW ml_genre_preference_features AS
 SELECT
     primary_genre,
-    COUNT(*)                        AS play_count,
-    COUNT(DISTINCT track_id)        AS unique_tracks,
-    COUNT(DISTINCT primary_artist_id) AS unique_artists,
-    AVG(track_popularity)           AS avg_track_popularity,
-    AVG(track_duration_ms)          AS avg_track_duration_ms,
-    MIN(denver_ts)                  AS first_listened_at,
-    MAX(denver_ts)                  AS last_listened_at
+    COUNT(*)                            AS play_count,
+    COUNT(DISTINCT track_id)            AS unique_tracks,
+    COUNT(DISTINCT primary_artist_id)   AS unique_artists,
+    AVG(lastfm_listeners)               AS avg_lastfm_listeners,
+    AVG(track_duration_ms)              AS avg_track_duration_ms,
+    MIN(denver_ts)                      AS first_listened_at,
+    MAX(denver_ts)                      AS last_listened_at
 FROM ml_user_recent_listens
 WHERE primary_genre IS NOT NULL
 GROUP BY primary_genre;
@@ -56,11 +58,11 @@ CREATE OR REPLACE VIEW ml_artist_preference_features AS
 SELECT
     primary_artist_id,
     primary_artist_name,
-    COUNT(*)                 AS play_count,
-    COUNT(DISTINCT track_id) AS unique_tracks,
-    AVG(track_popularity)    AS avg_track_popularity,
-    MIN(denver_ts)           AS first_listened_at,
-    MAX(denver_ts)           AS last_listened_at
+    COUNT(*)                    AS play_count,
+    COUNT(DISTINCT track_id)    AS unique_tracks,
+    AVG(lastfm_listeners)       AS avg_lastfm_listeners,
+    MIN(denver_ts)              AS first_listened_at,
+    MAX(denver_ts)              AS last_listened_at
 FROM ml_user_recent_listens
 WHERE primary_artist_id IS NOT NULL
 GROUP BY primary_artist_id, primary_artist_name;
@@ -72,10 +74,10 @@ SELECT
     primary_artist_id,
     primary_artist_name,
     primary_genre,
-    COUNT(*)              AS play_count,
-    AVG(track_popularity) AS avg_track_popularity,
-    MIN(denver_ts)        AS first_listened_at,
-    MAX(denver_ts)        AS last_listened_at
+    COUNT(*)                AS play_count,
+    AVG(lastfm_listeners)   AS avg_lastfm_listeners,
+    MIN(denver_ts)          AS first_listened_at,
+    MAX(denver_ts)          AS last_listened_at
 FROM ml_user_recent_listens
 WHERE track_id IS NOT NULL
 GROUP BY track_id, track_name, primary_artist_id, primary_artist_name, primary_genre;

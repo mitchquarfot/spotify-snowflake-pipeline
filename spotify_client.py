@@ -8,11 +8,68 @@ from typing import Dict, List, Optional, Generator
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth, SpotifyOauthError
 import structlog
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 
 from config import settings
 
 logger = structlog.get_logger(__name__)
+
+
+class AdaptiveRateLimiter:
+    """Adaptive rate limiter that respects Retry-After headers."""
+
+    def __init__(self):
+        self._consecutive_429s = 0
+        self._last_request_time = 0.0
+        self._min_interval = 60.0 / settings.rate_limit.requests_per_minute
+
+    def wait(self):
+        """Wait the appropriate amount between requests."""
+        elapsed = time.monotonic() - self._last_request_time
+        if elapsed < self._min_interval:
+            time.sleep(self._min_interval - elapsed)
+        self._last_request_time = time.monotonic()
+
+    def handle_rate_limit(self, retry_after: Optional[float] = None):
+        """Handle a 429 response, sleeping for the Retry-After duration."""
+        self._consecutive_429s += 1
+
+        if self._consecutive_429s >= settings.rate_limit.circuit_breaker_threshold:
+            pause = settings.rate_limit.circuit_breaker_pause_sec
+            logger.warning(
+                "Circuit breaker triggered — pausing",
+                consecutive_429s=self._consecutive_429s,
+                pause_sec=pause,
+            )
+            time.sleep(pause)
+            self._consecutive_429s = 0
+            return
+
+        if retry_after is not None:
+            sleep_time = min(retry_after, settings.rate_limit.max_backoff_sec)
+        else:
+            sleep_time = min(
+                settings.rate_limit.default_sleep_sec
+                * (settings.rate_limit.backoff_multiplier ** self._consecutive_429s),
+                settings.rate_limit.max_backoff_sec,
+            )
+
+        logger.info(
+            "Rate limited — sleeping",
+            retry_after=retry_after,
+            sleep_sec=sleep_time,
+            consecutive_429s=self._consecutive_429s,
+        )
+        time.sleep(sleep_time)
+
+    def reset(self):
+        """Reset consecutive 429 counter on a successful request."""
+        self._consecutive_429s = 0
 
 
 class SpotifyClient:
@@ -24,45 +81,116 @@ class SpotifyClient:
             client_id=settings.spotify.client_id,
             client_secret=settings.spotify.client_secret,
             redirect_uri=settings.spotify.redirect_uri,
-            scope="user-read-recently-played user-read-playback-state user-library-read",
+            scope="user-read-recently-played user-read-playback-state user-library-read user-top-read",
             cache_path=".spotify_cache",
             open_browser=False
         )
+        
+        # Track token expiry for proactive refresh
+        self._token_expires_at: Optional[float] = None
         
         # If we have a refresh token, use it
         if settings.spotify.refresh_token:
             self._setup_with_refresh_token()
         
         self.sp = spotipy.Spotify(auth_manager=self.auth_manager)
+        self._rate_limiter = AdaptiveRateLimiter()
         logger.info("Spotify client initialized")
     
     def _setup_with_refresh_token(self):
         """Set up auth manager with stored refresh token."""
         try:
-            # Create token info dict with refresh token
-            # Force-refresh immediately so the auth manager has a valid access token
             token_info = self.auth_manager.refresh_access_token(
                 settings.spotify.refresh_token
             )
             if not token_info or "access_token" not in token_info:
                 raise SpotifyOauthError("Failed to refresh access token")
             self.auth_manager.cache_handler.save_token_to_cache(token_info)
+            self._token_expires_at = token_info.get("expires_at")
             logger.info("Refreshed Spotify access token using provided refresh token")
         except SpotifyOauthError as e:
-            logger.error(
-                "Failed to refresh Spotify token with supplied refresh token",
-                error=str(e),
-                error_code=getattr(e, "error", None),
-                error_description=getattr(e, "error_description", None)
-            )
+            error_desc = getattr(e, "error_description", str(e))
+            is_revoked = "revoked" in error_desc.lower() or "invalid_grant" in str(
+                getattr(e, "error", "")
+            ).lower()
+            if is_revoked:
+                logger.error(
+                    "Spotify refresh token has been REVOKED — re-authorization required",
+                    error=str(e),
+                )
+            else:
+                logger.error(
+                    "Recoverable token refresh failure — token may have expired",
+                    error=str(e),
+                    error_code=getattr(e, "error", None),
+                    error_description=getattr(e, "error_description", None),
+                )
             raise
         except Exception as e:
             logger.warning("Failed to set up refresh token", error=str(e))
-    
+
+    def _ensure_token_fresh(self):
+        """Proactively refresh token if within the margin of expiry."""
+        if self._token_expires_at is None:
+            return
+        remaining = self._token_expires_at - time.time()
+        if remaining > settings.rate_limit.token_refresh_margin_sec:
+            return
+        logger.info(
+            "Token nearing expiry — proactively refreshing",
+            remaining_sec=remaining,
+        )
+        try:
+            token_info = self.auth_manager.refresh_access_token(
+                settings.spotify.refresh_token
+            )
+            if token_info and "access_token" in token_info:
+                self.auth_manager.cache_handler.save_token_to_cache(token_info)
+                self._token_expires_at = token_info.get("expires_at")
+                logger.info("Proactive token refresh succeeded")
+        except SpotifyOauthError as e:
+            error_desc = getattr(e, "error_description", str(e))
+            is_revoked = "revoked" in error_desc.lower() or "invalid_grant" in str(
+                getattr(e, "error", "")
+            ).lower()
+            if is_revoked:
+                logger.error(
+                    "Token REVOKED during proactive refresh — re-authorization required",
+                    error=str(e),
+                )
+                raise
+            logger.warning(
+                "Proactive token refresh failed (recoverable) — will retry on next call",
+                error=str(e),
+            )
+        except Exception as e:
+            logger.warning("Proactive token refresh failed unexpectedly", error=str(e))
+
+    def _rate_limited_call(self, func, *args, **kwargs):
+        """Execute a Spotify API call with adaptive rate limiting and token refresh."""
+        self._ensure_token_fresh()
+        self._rate_limiter.wait()
+        try:
+            result = func(*args, **kwargs)
+            self._rate_limiter.reset()
+            return result
+        except spotipy.exceptions.SpotifyException as e:
+            if e.http_status == 429:
+                retry_after = None
+                if hasattr(e, "headers") and e.headers:
+                    ra_header = e.headers.get("Retry-After")
+                    if ra_header is not None:
+                        try:
+                            retry_after = float(ra_header)
+                        except (ValueError, TypeError):
+                            pass
+                self._rate_limiter.handle_rate_limit(retry_after)
+                raise
+            raise
+
     def authenticate(self) -> bool:
         """Ensure user is authenticated."""
         try:
-            # This will use cached token or refresh if needed
             self.sp.current_user()
             logger.info("Successfully authenticated with Spotify")
             return True
@@ -82,7 +210,8 @@ class SpotifyClient:
     
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10)
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry=retry_if_exception_type(spotipy.exceptions.SpotifyException),
     )
     def get_recent_tracks(
         self, 
@@ -108,8 +237,10 @@ class SpotifyClient:
             if before:
                 params["before"] = before
                 
-            results = self.sp.current_user_recently_played(**params)
-            tracks = results.get("items", [])
+            results = self._rate_limited_call(
+                self.sp.current_user_recently_played, **params
+            )
+            tracks = results.get("items", []) if results else []
             
             logger.info(
                 "Fetched recent tracks",
@@ -135,8 +266,8 @@ class SpotifyClient:
         """
         after = since_timestamp
         safety_counter = 0
-        max_iterations = 500  # Safety net to prevent infinite pagination loops
-        
+        max_iterations = 500
+
         while True:
             safety_counter += 1
             if safety_counter > max_iterations:
@@ -167,20 +298,13 @@ class SpotifyClient:
                     last_track_time.replace("Z", "+00:00")
                 ).timestamp() * 1000
             )
-            # Spotify's API can occasionally return multiple tracks with identical
-            # millisecond timestamps. Bump by one ms so we always make forward progress
-            # and avoid re-fetching the same page in a tight loop.
             next_after = last_timestamp + 1
             
-            # If we didn't get a full batch, we've reached the end
             if len(tracks) < settings.pipeline.batch_size:
                 logger.info("Reached end of available tracks")
                 break
                 
             after = next_after
-            
-            # Rate limiting - Spotify allows 100 requests per minute
-            time.sleep(0.6)  # ~60 requests per minute to be safe
     
     def transform_track_data(self, track_item: Dict) -> Dict:
         """
@@ -192,14 +316,18 @@ class SpotifyClient:
         Returns:
             Transformed track data
         """
-        track = track_item.get("track", {})
+        track = track_item.get("track") or {}
         played_at = track_item.get("played_at")
-        context = track_item.get("context", {})
+        context = track_item.get("context") or {}
         
         # Parse timestamp
         played_at_dt = datetime.fromisoformat(
             played_at.replace("Z", "+00:00")
-        )
+        ) if played_at else datetime.now(timezone.utc)
+
+        artists = track.get("artists") or []
+        album = track.get("album") or {}
+        first_artist = artists[0] if artists else {}
         
         return {
             # Listening metadata
@@ -214,7 +342,8 @@ class SpotifyClient:
             "track_duration_ms": track.get("duration_ms"),
             "track_explicit": track.get("explicit"),
             "track_preview_url": track.get("preview_url"),
-            "track_external_urls": json.dumps(track.get("external_urls", {})),
+            "track_external_urls": json.dumps(track.get("external_urls") or {}),
+            "track_isrc": (track.get("external_ids") or {}).get("isrc"),
             
             # Artist information
             "artists": json.dumps([
@@ -222,25 +351,25 @@ class SpotifyClient:
                     "id": artist.get("id"),
                     "name": artist.get("name"),
                     "uri": artist.get("uri"),
-                    "external_urls": artist.get("external_urls", {})
+                    "external_urls": artist.get("external_urls") or {}
                 }
-                for artist in track.get("artists", [])
+                for artist in artists
             ]),
-            "primary_artist_id": track.get("artists", [{}])[0].get("id"),
-            "primary_artist_name": track.get("artists", [{}])[0].get("name"),
+            "primary_artist_id": first_artist.get("id"),
+            "primary_artist_name": first_artist.get("name"),
             
             # Album information
-            "album_id": track.get("album", {}).get("id"),
-            "album_name": track.get("album", {}).get("name"),
-            "album_type": track.get("album", {}).get("album_type"),
-            "album_release_date": track.get("album", {}).get("release_date"),
-            "album_total_tracks": track.get("album", {}).get("total_tracks"),
-            "album_images": json.dumps(track.get("album", {}).get("images", [])),
+            "album_id": album.get("id"),
+            "album_name": album.get("name"),
+            "album_type": album.get("album_type"),
+            "album_release_date": album.get("release_date"),
+            "album_total_tracks": album.get("total_tracks"),
+            "album_images": json.dumps(album.get("images") or []),
             
             # Context (playlist, artist, album, etc.)
             "context_type": context.get("type") if context else None,
             "context_uri": context.get("uri") if context else None,
-            "context_external_urls": json.dumps(context.get("external_urls", {})) if context else None,
+            "context_external_urls": json.dumps(context.get("external_urls") or {}) if context else None,
             
             # Audio features (to be enriched separately if needed)
             "track_uri": track.get("uri"),
@@ -263,8 +392,8 @@ class SpotifyClient:
         unique_artists = {}
         
         for track_item in track_items:
-            track = track_item.get("track", {})
-            artists = track.get("artists", [])
+            track = track_item.get("track") or {}
+            artists = track.get("artists") or []
             
             for artist in artists:
                 artist_id = artist.get("id")
@@ -273,14 +402,15 @@ class SpotifyClient:
                         "id": artist_id,
                         "name": artist.get("name"),
                         "uri": artist.get("uri"),
-                        "external_urls": artist.get("external_urls", {})
+                        "external_urls": artist.get("external_urls") or {}
                     }
         
         return list(unique_artists.values())
     
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10)
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry=retry_if_exception_type(spotipy.exceptions.SpotifyException),
     )
     def get_artist_details(self, artist_id: str) -> Optional[Dict]:
         """
@@ -293,7 +423,7 @@ class SpotifyClient:
             Artist details including genres, or None if not found
         """
         try:
-            artist = self.sp.artist(artist_id)
+            artist = self._rate_limited_call(self.sp.artist, artist_id)
             logger.debug("Fetched artist details", artist_id=artist_id, name=artist.get("name"))
             return artist
         except Exception as e:
@@ -336,10 +466,6 @@ class SpotifyClient:
                         success_count=len(all_artists)
                     )
                 
-                # Rate limiting - Spotify allows ~100 requests/minute
-                # Be conservative with individual calls
-                time.sleep(0.6)
-                
             except Exception as e:
                 logger.warning(
                     "Failed to fetch artist",
@@ -365,7 +491,7 @@ class SpotifyClient:
         Returns:
             Transformed artist data with genres
         """
-        genres = artist.get("genres", [])
+        genres = artist.get("genres") or []
         
         data_source = "spotify_artist_api"
         genre_inference_methods = None
@@ -373,7 +499,7 @@ class SpotifyClient:
         
         if enhance_empty_genres and not genres:
             enhanced_artist = self._enhance_empty_genres(artist)
-            genres = enhanced_artist.get("genres", [])
+            genres = enhanced_artist.get("genres") or []
             genre_inference_methods = enhanced_artist.get("genre_inference_methods")
             original_genres_empty = enhanced_artist.get("original_genres_empty", False)
             if genre_inference_methods:
@@ -387,8 +513,8 @@ class SpotifyClient:
             "genres_list": genres,
             "primary_genre": genres[0] if genres else None,
             "genre_count": len(genres),
-            "external_urls": json.dumps(artist.get("external_urls", {})),
-            "images": json.dumps(artist.get("images", [])),
+            "external_urls": json.dumps(artist.get("external_urls") or {}),
+            "images": json.dumps(artist.get("images") or []),
             "ingested_at": datetime.now(timezone.utc).isoformat(),
             "data_source": data_source
         }
@@ -413,7 +539,7 @@ class SpotifyClient:
         Returns:
             Enhanced artist data with inferred genres
         """
-        original_genres = artist.get("genres", [])
+        original_genres = artist.get("genres") or []
         
         if original_genres:
             return artist
@@ -421,7 +547,7 @@ class SpotifyClient:
         inferred_genres = []
         inference_methods = []
         
-        name_genre = self._infer_genre_from_name(artist.get("name", ""))
+        name_genre = self._infer_genre_from_name(artist.get("name") or "")
         if name_genre:
             inferred_genres.append(name_genre)
             inference_methods.append("name_pattern")
@@ -458,7 +584,6 @@ class SpotifyClient:
             
         name_lower = artist_name.lower()
         
-        # Common genre mappings based on artist name patterns
         genre_patterns = {
             'electronic': ['dj ', 'dj_', 'electronic', 'edm', 'house', 'techno', 'trance'],
             'hip hop': ['lil ', 'young ', 'big ', 'rapper', 'mc ', 'hip hop', 'rap'],
@@ -472,7 +597,6 @@ class SpotifyClient:
             'r&b': ['r&b', 'soul', 'rnb']
         }
         
-        # Check for common patterns
         for genre, patterns in genre_patterns.items():
             for pattern in patterns:
                 if pattern in name_lower:
@@ -504,27 +628,30 @@ class SpotifyClient:
                     effective=effective_limit
                 )
             logger.info(f"Searching Spotify: {query} (type: {search_type}, limit: {effective_limit})")
-            results = self.sp.search(q=query, type=search_type, limit=effective_limit)
-            return results
+            results = self._rate_limited_call(
+                self.sp.search, q=query, type=search_type, limit=effective_limit
+            )
+            return results or {}
         except Exception as e:
             logger.error(f"Error searching Spotify: {e}")
             return {}
     
     def get_recommendations(self, **kwargs) -> Dict:
         """
-        Get track recommendations from Spotify.
-        
+        DEPRECATED: The Spotify /recommendations endpoint was removed in February 2026.
+
+        This method is retained for backward compatibility with existing callers
+        (e.g., spotify_discovery_system.py) and will be cleaned up in Workstream C.
+        It will always return an empty tracks list and log a deprecation warning.
+
         Args:
-            **kwargs: Recommendation parameters (seed_artists, seed_tracks, 
-                     target_popularity, min_popularity, max_popularity, etc.)
-                     
+            **kwargs: Legacy recommendation parameters (ignored).
+
         Returns:
-            Recommendations from Spotify API
+            Dict with empty 'tracks' list.
         """
-        try:
-            logger.info(f"Getting Spotify recommendations with params: {kwargs}")
-            recommendations = self.sp.recommendations(**kwargs)
-            return recommendations
-        except Exception as e:
-            logger.error(f"Error getting recommendations: {e}")
-            return {'tracks': []}
+        logger.warning(
+            "get_recommendations called but the Spotify /recommendations endpoint "
+            "was removed in February 2026. Returning empty results."
+        )
+        return {'tracks': []}
