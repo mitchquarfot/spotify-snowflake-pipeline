@@ -23,7 +23,7 @@ USE SCHEMA ANALYTICS;
 -- 1. AI_COMPLETE: Genre/Mood Classification for Unclassified Artists
 --
 -- Targets artists where genres are empty ('[]') or only contain 'unclassified'.
--- Uses mistral-large2 to infer primary_genre and mood from the artist name
+-- Uses claude-sonnet-4-6 to infer primary_genre and mood from the artist name
 -- and any partial genre data available.
 -- -----------------------------------------------------------------------------
 
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS SPOTIFY_ANALYTICS.ANALYTICS.ARTIST_AI_GENRES (
     ai_secondary_genre  VARCHAR(128),
     ai_mood             VARCHAR(128),
     ai_confidence       FLOAT,
-    ai_model            VARCHAR(64)   DEFAULT 'mistral-large2',
+    ai_model            VARCHAR(64)   DEFAULT 'claude-sonnet-4-6',
     classified_at       TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
     PRIMARY KEY (artist_id)
 );
@@ -52,14 +52,14 @@ SELECT
     TRIM(SPLIT_PART(ai_response, '|', 2))                       AS ai_secondary_genre,
     TRIM(SPLIT_PART(ai_response, '|', 3))                       AS ai_mood,
     TRY_CAST(TRIM(SPLIT_PART(ai_response, '|', 4)) AS FLOAT)   AS ai_confidence,
-    'mistral-large2'                                             AS ai_model
+    'claude-sonnet-4-6'                                          AS ai_model
 FROM (
     SELECT
         artist_id,
         artist_name,
         genres,
         SNOWFLAKE.CORTEX.COMPLETE(
-            'mistral-large2',
+            'claude-sonnet-4-6',
             CONCAT(
                 'You are a music genre classifier. Given an artist name, infer their most likely ',
                 'primary genre, secondary genre, mood, and your confidence (0.0-1.0). ',
@@ -72,12 +72,19 @@ FROM (
                 'Response:'
             )
         ) AS ai_response
-    FROM SPOTIFY_ANALYTICS.RAW_DATA.SPOTIFY_ARTIST_GENRES
-    WHERE genres IN ('[]', '["unclassified"]')
-      AND artist_id NOT IN (
-          SELECT artist_id FROM SPOTIFY_ANALYTICS.ANALYTICS.ARTIST_AI_GENRES
-      )
-    LIMIT 500  -- Process in batches to control cost; adjust as needed
+    FROM (
+        -- Dedupe source by artist_id BEFORE the LLM call. SPOTIFY_ARTIST_GENRES
+        -- is not unique on artist_id (~6 rows/artist); without this the COMPLETE
+        -- call runs per duplicate and the target table fans out.
+        SELECT artist_id, artist_name, genres
+        FROM SPOTIFY_ANALYTICS.RAW_DATA.SPOTIFY_ARTIST_GENRES
+        WHERE genres IN ('[]', '["unclassified"]')
+          AND artist_id NOT IN (
+              SELECT artist_id FROM SPOTIFY_ANALYTICS.ANALYTICS.ARTIST_AI_GENRES
+          )
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY artist_id ORDER BY ingested_at DESC) = 1
+    )
+    -- Full backfill: no LIMIT. Idempotent via NOT IN above.
 ) ag
 WHERE ai_response IS NOT NULL
   AND SPLIT_PART(ai_response, '|', 1) != '';
@@ -116,13 +123,19 @@ SELECT
             COALESCE(ai.ai_primary_genre, ag.primary_genre, 'unknown')
         )
     ) AS embedding
-FROM SPOTIFY_ANALYTICS.RAW_DATA.SPOTIFY_ARTIST_GENRES ag
+FROM (
+    -- Dedupe source by artist_id BEFORE embedding (SPOTIFY_ARTIST_GENRES is not
+    -- unique on artist_id). Prevents fan-out and duplicate embedding calls.
+    SELECT artist_id, artist_name, primary_genre
+    FROM SPOTIFY_ANALYTICS.RAW_DATA.SPOTIFY_ARTIST_GENRES
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY artist_id ORDER BY ingested_at DESC) = 1
+) ag
 LEFT JOIN SPOTIFY_ANALYTICS.ANALYTICS.ARTIST_AI_GENRES ai
     ON ag.artist_id = ai.artist_id
 WHERE ag.artist_id NOT IN (
     SELECT artist_id FROM SPOTIFY_ANALYTICS.ANALYTICS.ARTIST_EMBEDDINGS
-)
-LIMIT 1000;  -- Process in batches to control cost
+);
+-- Full backfill: no LIMIT. Idempotent via NOT IN above.
 
 
 -- -----------------------------------------------------------------------------
