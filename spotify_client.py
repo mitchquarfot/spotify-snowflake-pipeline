@@ -212,7 +212,6 @@ class SpotifyClient:
             "track_id": track.get("id"),
             "track_name": track.get("name"),
             "track_duration_ms": track.get("duration_ms"),
-            "track_popularity": track.get("popularity"),
             "track_explicit": track.get("explicit"),
             "track_preview_url": track.get("preview_url"),
             "track_external_urls": json.dumps(track.get("external_urls", {})),
@@ -301,61 +300,63 @@ class SpotifyClient:
             logger.warning("Failed to fetch artist details", artist_id=artist_id, error=str(e))
             return None
     
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10)
-    )
     def get_multiple_artists(self, artist_ids: List[str], batch_size: int = 50) -> List[Dict]:
         """
-        Get details for multiple artists in batches.
+        Get details for multiple artists using individual API calls.
+        
+        Note: As of February 2026, Spotify removed the batch GET /artists endpoint.
+        This method now fetches artists individually via GET /artists/{id}.
         
         Args:
             artist_ids: List of Spotify artist IDs
-            batch_size: Number of artists to fetch per batch (max 50)
+            batch_size: Number of artists per logging batch (for progress tracking)
             
         Returns:
             List of artist detail dictionaries
         """
         all_artists = []
         
-        # Process in batches due to API limitations
-        for i in range(0, len(artist_ids), batch_size):
-            batch_ids = artist_ids[i:i + batch_size]
-            
+        # Remove any None/empty values
+        artist_ids = [aid for aid in artist_ids if aid]
+        if not artist_ids:
+            return all_artists
+        
+        for i, artist_id in enumerate(artist_ids):
             try:
-                # Remove any None values
-                batch_ids = [aid for aid in batch_ids if aid]
-                if not batch_ids:
-                    continue
+                artist = self.get_artist_details(artist_id)
+                if artist:
+                    all_artists.append(artist)
                 
-                artists = self.sp.artists(batch_ids)
-                batch_artists = artists.get("artists", [])
-                all_artists.extend([artist for artist in batch_artists if artist])
+                # Log progress at batch intervals
+                if (i + 1) % batch_size == 0:
+                    logger.info(
+                        "Artist fetch progress",
+                        fetched=i + 1,
+                        total=len(artist_ids),
+                        success_count=len(all_artists)
+                    )
                 
-                logger.info(
-                    "Fetched artist batch",
-                    batch_number=i // batch_size + 1,
-                    batch_size=len(batch_ids),
-                    fetched_count=len(batch_artists)
-                )
-                
-                # Rate limiting - be conservative with batch requests
-                time.sleep(1.0)
+                # Rate limiting - Spotify allows ~100 requests/minute
+                # Be conservative with individual calls
+                time.sleep(0.6)
                 
             except Exception as e:
-                logger.error(
-                    "Failed to fetch artist batch",
-                    batch_ids=batch_ids,
+                logger.warning(
+                    "Failed to fetch artist",
+                    artist_id=artist_id,
                     error=str(e)
                 )
                 continue
         
-        logger.info("Completed artist batch fetching", total_fetched=len(all_artists))
+        logger.info("Completed artist fetching", total_fetched=len(all_artists), total_requested=len(artist_ids))
         return all_artists
     
     def transform_artist_data(self, artist: Dict, enhance_empty_genres: bool = True) -> Dict:
         """
         Transform artist data into Snowflake-friendly format.
+        
+        Note: As of February 2026, Spotify removed 'popularity' and 'followers' 
+        fields from artist objects.
         
         Args:
             artist: Raw artist data from Spotify API
@@ -365,15 +366,12 @@ class SpotifyClient:
             Transformed artist data with genres
         """
         genres = artist.get("genres", [])
-        followers = artist.get("followers", {})
         
-        # Enhanced genre processing for empty genres
         data_source = "spotify_artist_api"
         genre_inference_methods = None
         original_genres_empty = False
         
         if enhance_empty_genres and not genres:
-            # Try to infer genres for artists with empty genre arrays
             enhanced_artist = self._enhance_empty_genres(artist)
             genres = enhanced_artist.get("genres", [])
             genre_inference_methods = enhanced_artist.get("genre_inference_methods")
@@ -386,18 +384,15 @@ class SpotifyClient:
             "artist_name": artist.get("name"),
             "artist_uri": artist.get("uri"),
             "genres": json.dumps(genres),
-            "genres_list": genres,  # For easier querying
-            "primary_genre": genres[0] if genres else None,  # Most relevant genre (safe access)
+            "genres_list": genres,
+            "primary_genre": genres[0] if genres else None,
             "genre_count": len(genres),
-            "popularity": artist.get("popularity"),
-            "followers_total": followers.get("total") if followers else None,
             "external_urls": json.dumps(artist.get("external_urls", {})),
             "images": json.dumps(artist.get("images", [])),
             "ingested_at": datetime.now(timezone.utc).isoformat(),
             "data_source": data_source
         }
         
-        # Add enhancement metadata if genres were inferred
         if original_genres_empty:
             result["original_genres_empty"] = True
             if genre_inference_methods:
@@ -409,6 +404,9 @@ class SpotifyClient:
         """
         Enhance artist with inferred genres when original genres are empty.
         
+        Note: As of February 2026, popularity/followers fields are no longer available,
+        so genre inference relies solely on name-based patterns.
+        
         Args:
             artist: Raw artist data from Spotify API
             
@@ -417,29 +415,17 @@ class SpotifyClient:
         """
         original_genres = artist.get("genres", [])
         
-        # If we already have genres, return as-is
         if original_genres:
             return artist
         
-        # Try to infer genres using various strategies
         inferred_genres = []
         inference_methods = []
         
-        # Strategy 1: Name-based inference
         name_genre = self._infer_genre_from_name(artist.get("name", ""))
         if name_genre:
             inferred_genres.append(name_genre)
             inference_methods.append("name_pattern")
         
-        # Strategy 2: Popularity-based inference
-        popularity = artist.get("popularity")
-        followers = artist.get("followers", {}).get("total")
-        popularity_genre = self._infer_genre_from_popularity(popularity, followers)
-        if popularity_genre and popularity_genre not in inferred_genres:
-            inferred_genres.append(popularity_genre)
-            inference_methods.append("popularity_analysis")
-        
-        # If we inferred any genres, update the artist data
         if inferred_genres:
             enhanced_data = artist.copy()
             enhanced_data["genres"] = inferred_genres
@@ -454,7 +440,6 @@ class SpotifyClient:
             
             return enhanced_data
         
-        # If no genres could be inferred, add a generic classification
         enhanced_data = artist.copy()
         enhanced_data["genres"] = ["unclassified"]
         enhanced_data["genre_inference_methods"] = ["fallback"]
@@ -462,9 +447,7 @@ class SpotifyClient:
         
         logger.warning("Could not infer genres for artist",
                       artist_name=artist.get("name"),
-                      artist_id=artist.get("id"),
-                      popularity=popularity,
-                      followers=followers)
+                      artist_id=artist.get("id"))
         
         return enhanced_data
     
@@ -497,38 +480,31 @@ class SpotifyClient:
         
         return None
     
-    def _infer_genre_from_popularity(self, popularity: int, followers: int) -> Optional[str]:
-        """Infer genre based on popularity and follower count."""
-        if popularity is None:
-            return None
-            
-        # Popularity-based genre inference
-        if popularity >= 80:
-            return 'mainstream pop'
-        elif popularity >= 60:
-            return 'pop'
-        elif popularity >= 40:
-            return 'alternative'
-        elif popularity >= 20:
-            return 'indie'
-        else:
-            return 'underground'
-    
     def search(self, query: str, search_type: str = 'track', limit: int = 10) -> Dict:
         """
         Search Spotify catalog.
         
+        Note: As of February 2026, Spotify reduced search limits from 50 to 10 max,
+        and default from 20 to 5.
+        
         Args:
             query: Search query string
             search_type: Type of search ('track', 'artist', 'album', etc.)
-            limit: Maximum number of results
+            limit: Maximum number of results (max 10 as of Feb 2026)
             
         Returns:
             Search results from Spotify API
         """
         try:
-            logger.info(f"Searching Spotify: {query} (type: {search_type})")
-            results = self.sp.search(q=query, type=search_type, limit=limit)
+            effective_limit = min(limit, 10)
+            if limit > 10:
+                logger.warning(
+                    "Search limit capped at 10 per Spotify API Feb 2026 changes",
+                    requested=limit,
+                    effective=effective_limit
+                )
+            logger.info(f"Searching Spotify: {query} (type: {search_type}, limit: {effective_limit})")
+            results = self.sp.search(q=query, type=search_type, limit=effective_limit)
             return results
         except Exception as e:
             logger.error(f"Error searching Spotify: {e}")
