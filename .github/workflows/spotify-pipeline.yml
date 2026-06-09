@@ -1,8 +1,11 @@
-name: Daily Spotify Data Collection
+name: Spotify Data Collection
 
 on:
   schedule:
-    - cron: '0 9 * * *'
+    # Every 3 hours. Spotify's recently-played endpoint only retains the last
+    # ~50 plays, so a once-daily run lost data on days with >50 plays. Running
+    # 8x/day keeps each interval well under the 50-play ceiling.
+    - cron: '0 */3 * * *'
   workflow_dispatch:
 
 jobs:
