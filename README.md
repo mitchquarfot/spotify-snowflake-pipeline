@@ -46,12 +46,19 @@ A comprehensive, production-ready pipeline that transforms your Spotify listenin
 - **🔄 Automated Retraining**: Self-monitoring system with performance tracking
 
 ### 🔄 Automation & CI/CD
-- **🚀 GitHub Actions**: Automated daily data collection
+- **🚀 GitHub Actions**: Automated collection every 3 hours (8 runs/day, cron: `0 */3 * * *`)
 - **📈 Pipeline Monitoring**: Track collection statistics and data quality
 - **🔧 Health Checks**: Automated testing and validation
 - **📧 Notifications**: Pipeline status and error reporting
-- **🤖 ML Automation**: Automated model monitoring, retraining, and deployment
-- **🛡️ Keep-Alive Script**: [`scripts/trigger_actions_keepalive.sh`](scripts/trigger_actions_keepalive.sh) + [`docs/github_actions_keepalive.md`](docs/github_actions_keepalive.md) show how to trigger a `workflow_dispatch` run via cron (e.g., first Monday of the month at noon MT) so GitHub never disables the scheduled workflow due to inactivity.
+- **🛡️ No Stale Workflow**: Running every 3 hours provides enough activity to prevent GitHub from disabling the scheduled workflow (the 60-day inactivity rule).
+
+### 🧪 June 2026 Enhancements
+- **🤖 Cortex AI Genre Classification**: `AI_COMPLETE` (claude-sonnet-4-6) classifies unclassified artists into genre + mood, stored in `ANALYTICS.ARTIST_AI_GENRES`
+- **🔢 Artist Embeddings**: `EMBED_TEXT_768` (snowflake-arctic-embed-m) generates 768-dim similarity vectors for every artist in `ANALYTICS.ARTIST_EMBEDDINGS`, powering cosine-similarity recommendations
+- **🎯 Artist Search Views**: Three segmented source views for Cortex Search services — `ARTIST_SEARCH_LEAD_ARTISTS` (primary-listened artists), `ARTIST_SEARCH_FEATURED_ARTISTS` (featured-only), `ARTIST_SEARCH_RECOMMENDED` (AI-generated discovery candidates)
+- **📱 Streamlit Dashboard**: Interactive SiS app (`STREAMLIT_APPS.SPOTIFY_DASHBOARD`) with Trends, Genre, Artist, Discovery, Pipeline Health, and Cortex Analyst NL Q&A tabs
+- **🗄️ Snowflake-Backed Pipeline State**: `RAW_DATA.PIPELINE_STATE` + `RAW_DATA.PIPELINE_ERRORS` replace ephemeral file-based JSON state, fixing silent data loss on GitHub Actions runners
+- **🔒 Hardened Client**: Adaptive rate limiter with Retry-After parsing, proactive token refresh, ISRC capture, `user-top-read` scope
 
 ## 📊 Data Schema & Analytics
 
@@ -60,13 +67,12 @@ A comprehensive, production-ready pipeline that transforms your Spotify listenin
 {
   "unique_play": "20240115_143000_4iV5W9uYEdYUVa79Axb7Rh",
   "played_at": "2024-01-15T14:30:00Z",
-  "denver_timestamp": "2024-01-15T07:30:00",
+  "denver_ts": "2024-01-15T07:30:00",
   "track_id": "4iV5W9uYEdYUVa79Axb7Rh",
   "track_name": "Never Gonna Give You Up",
+  "track_isrc": "USQX92040522",
   "primary_artist_name": "Rick Astley",
   "primary_genre": "dance pop",
-  "artist_popularity": 73,
-  "mainstream_score": 78.5,
   "time_of_day_category": "morning",
   "is_weekend": false
 }
@@ -84,7 +90,7 @@ A comprehensive, production-ready pipeline that transforms your Spotify listenin
 ### Option 1: Automated Setup (Recommended)
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/spotify-snowflake-pipeline.git
+git clone https://github.com/mitchquarfot/spotify-snowflake-pipeline.git
 cd spotify-snowflake-pipeline
 
 # Run the automated setup script
@@ -103,7 +109,7 @@ chmod +x quick_start.sh
 ### Option 2: Manual Setup
 ```bash
 # 1. Clone and setup environment
-git clone https://github.com/your-username/spotify-snowflake-pipeline.git
+git clone https://github.com/mitchquarfot/spotify-snowflake-pipeline.git
 cd spotify-snowflake-pipeline
 python3 -m venv venv
 source venv/bin/activate
@@ -345,10 +351,10 @@ SELECT SNOWFLAKE.CORTEX.ANALYST(
    AWS_SECRET_ACCESS_KEY
    S3_BUCKET_NAME
    ```
-3. **Enable GitHub Actions** - your data will be collected automatically every day at 9 AM!
+3. **Enable GitHub Actions** - your data will be collected automatically 8 times per day (every 3 hours)!
 
 ### Workflow Features
-- ✅ **Daily Collection**: Automated data gathering
+- ✅ **Every-3-Hours Collection**: Automated data gathering (8 runs/day)
 - ✅ **Genre Processing**: Enhanced artist genre data
 - ✅ **Error Handling**: Notifications on failures
 - ✅ **Statistics Reporting**: Daily collection summaries
@@ -389,7 +395,7 @@ SELECT SNOWFLAKE.CORTEX.ANALYST(
 2. **Gap Detection**: Identifies artists with empty genre arrays (~30% of artists)
 3. **AI Enhancement**: Uses multiple inference strategies:
    - **Name Pattern Analysis**: "DJ" → "electronic", "& The" → "band"
-   - **Popularity Mapping**: High popularity + followers → "mainstream pop"
+   - **Cortex AI Classification**: `AI_COMPLETE` (claude-sonnet-4-6) infers genre + mood for unclassified artists
    - **Fallback Classification**: "unclassified" for unclear cases
 4. **Source Tracking**: Maintains data lineage (Spotify vs AI-enhanced)
 
@@ -519,8 +525,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **📖 Complete Setup Guide**: [QUICK_START.md](QUICK_START.md)
 - **🎯 Example Queries**: [SQL Examples](examples/)
-- **🐛 Issue Tracker**: [GitHub Issues](https://github.com/your-username/spotify-snowflake-pipeline/issues)
-- **💬 Discussions**: [GitHub Discussions](https://github.com/your-username/spotify-snowflake-pipeline/discussions)
+- **🐛 Issue Tracker**: [GitHub Issues](https://github.com/mitchquarfot/spotify-snowflake-pipeline/issues)
+- **💬 Discussions**: [GitHub Discussions](https://github.com/mitchquarfot/spotify-snowflake-pipeline/discussions)
 - **📊 Spotify API Docs**: [Developer Documentation](https://developer.spotify.com/documentation/web-api/)
 - **❄️ Snowflake Docs**: [Data Cloud Documentation](https://docs.snowflake.com/)
 
